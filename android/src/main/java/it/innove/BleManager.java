@@ -297,7 +297,7 @@ class BleManager extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void startStopBle(String peripheralUUID, int gameNo){
+    public void startStopBle(String peripheralUUID, int gameNo, boolean eventState){
         //Peripheral peripheral = peripherals.startingDevice();
         Log.d(LOG_TAG, "startDevice: " + peripheralUUID);
         Peripheral peripheral = peripherals.get(peripheralUUID);
@@ -331,7 +331,7 @@ class BleManager extends ReactContextBaseJavaModule {
         Log.d(LOG_TAG, "createSensorDataCSV");
 
         localFile = new File(reactContext.getFilesDir(), fileName+".csv");
-        String row_labels = "Time,Ch1R,Ch1Rs,Ch1IR,Ch1Rs,Ch2R,Ch2Rs,Ch2IR,Ch2IRs,Ch3R,Ch3Rs,Ch3IR,Ch3IRs,Ch4R,Ch4Rs,Ch4IR,Ch4IRs,Ch5R,Ch5Rs,Ch5IR,Ch5IRs,Ch6R,Ch6Rs,Ch6IR,Ch6IRs,Ch7R,Ch7Rs,Ch7IR,Ch7IRs,Ch8R,Ch8Rs,Ch8IR,Ch8IRs,Ch9R,Ch9Rs,Ch9IR,Ch9IRs,Ch10R,Ch10Rs,Ch10IR,Ch10IRs,Ch11R,Ch11Rs,Ch11IR,Ch11IRs,Ch12R,Ch12Rs,Ch12IR,Ch12IRs,Ch13R,Ch13Rs,Ch13IR,Ch13IRs,Ch14R,Ch14Rs,Ch14IR,Ch14IRs,Ch15R,Ch15Rs,Ch15IR,Ch15IRs,Ch16R,Ch16Rs,Ch16IR,Ch16IRs,Ch17R,Ch17Rs,Ch17IR,Ch17IRs,accX,accY,accZ,magX,magY,magZ,gyroX,gyroY,gyroZ" + "\r\n";
+        String row_labels = "Date,Time,Ch1R,Ch1Rs,Ch1IR,Ch1Rs,Ch2R,Ch2Rs,Ch2IR,Ch2IRs,Ch3R,Ch3Rs,Ch3IR,Ch3IRs,Ch4R,Ch4Rs,Ch4IR,Ch4IRs,Ch5R,Ch5Rs,Ch5IR,Ch5IRs,Ch6R,Ch6Rs,Ch6IR,Ch6IRs,Ch7R,Ch7Rs,Ch7IR,Ch7IRs,Ch8R,Ch8Rs,Ch8IR,Ch8IRs,Ch9R,Ch9Rs,Ch9IR,Ch9IRs,Ch10R,Ch10Rs,Ch10IR,Ch10IRs,Ch11R,Ch11Rs,Ch11IR,Ch11IRs,Ch12R,Ch12Rs,Ch12IR,Ch12IRs,Ch13R,Ch13Rs,Ch13IR,Ch13IRs,Ch14R,Ch14Rs,Ch14IR,Ch14IRs,Ch15R,Ch15Rs,Ch15IR,Ch15IRs,Ch16R,Ch16Rs,Ch16IR,Ch16IRs,Ch17R,Ch17Rs,Ch17IR,Ch17IRs,accX,accY,accZ,magX,magY,magZ,gyroX,gyroY,gyroZ" + "\r\n";
         if (!localFile.exists()) {
             try {
                 localFile.createNewFile();
