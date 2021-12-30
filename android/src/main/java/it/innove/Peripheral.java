@@ -44,6 +44,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
 import java.util.Calendar;
 
 import java.nio.ByteBuffer;
@@ -637,8 +638,13 @@ public class Peripheral extends BluetoothGattCallback {
 //        gyroDataX = (float) (wrap.getShort(108) - 10000) / 100;
 //        gyroDataY = (float) (wrap.getShort(110) - 10000) / 100;
 //        gyroDataZ = (float) (wrap.getShort(112) - 10000) / 100;
+		
+		LocalDateTime myDateObj = LocalDateTime.now();  
+    		DateTimeFormatter myFormatObj = DateTimeFormatter.ofPattern("MM/dd/YYYY HH:mm:ss");  
+    		String formattedDate = myDateObj.format(myFormatObj);  
 
-		String message = timerString +
+		String message = formattedDate +
+						","+ timerString +
 						"," + ch1R +
 						"," + ch1Rs +
 						"," + ch1IR +
@@ -1288,21 +1294,23 @@ public void getSNR(){
 		}
 	}
 
-	public void StarStopDevice(File sFileName, int gameNo){
+	public void StarStopDevice(File sFileName, int gameNo,boolean eventState){
 		localFile = sFileName;
 		Log.e(BleManager.LOG_TAG, connected +"--"+eventState+"StartingDevice");
 		if (isConnected()) {
 			if (eventState){
 				Log.e(BleManager.LOG_TAG, "toggle A");
 				eventValue = hexStringToByteArray("01");
-				eventState = false;
 				tsStart= System.currentTimeMillis();
 			}
 			else{
 				Log.e(BleManager.LOG_TAG, "toggle B");
 				eventValue = hexStringToByteArray("00");
-				eventState = true;
-				if(gameNo == 2){
+				if(gameNo == 0){
+				    fileNames = "";
+				    fileNames = fileNames+localFile.getPath().toString()+",";	
+				}
+				else if(gameNo == 2){
 					try{
 						WritableMap map = Arguments.createMap();
 						map.putString("file_list", fileNames+localFile.getPath().toString());
