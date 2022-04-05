@@ -301,7 +301,7 @@ class BleManager extends ReactContextBaseJavaModule {
         //Peripheral peripheral = peripherals.startingDevice();
         Log.d(LOG_TAG, "startDevice: " + peripheralUUID);
         Peripheral peripheral = peripherals.get(peripheralUUID);
-        peripheral.StarStopDevice(localFile,gameNo);
+        peripheral.StarStopDevice(localFile,gameNo,eventState);
     }
 
     // @ReactMethod
