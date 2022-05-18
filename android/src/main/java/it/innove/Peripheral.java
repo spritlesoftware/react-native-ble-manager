@@ -1311,13 +1311,13 @@ public void getSNR(){
 				    fileNames = "";
 				    fileNames = fileNames+localFile.getPath().toString()+",";	
 				}
-				else if(gameNo == 2){
+				else if(gameNo == 3){
 					try{
 						WritableMap map = Arguments.createMap();
 						map.putString("file_list", fileNames+localFile.getPath().toString());
 						Log.e(BleManager.LOG_TAG, "--"+fileNames);
 						//Log.e(BleManager.LOG_TAG, fileNames.toString());
-            sendEvent("FilesGenerated", map);
+            					sendEvent("FilesGenerated", map);
 					}catch (Exception e){
 						e.printStackTrace();
 					}
