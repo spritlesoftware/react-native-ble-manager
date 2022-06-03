@@ -31,6 +31,8 @@ double valuesR[100][16];
 double valuesIR[100][16];
 int snrDataBufferSize = 0;
 NSString *fileNames = @"";
+CBCharacteristic *NotifyCharacteristic;
+CBCharacteristic *WriteCharacteristic;
 
 - (instancetype)init
 {
@@ -92,13 +94,6 @@ NSString *fileNames = @"";
     return @[@"BleManagerDidUpdateValueForCharacteristic", @"BleManagerStopScan", @"BleManagerDiscoverPeripheral", @"BleManagerConnectPeripheral", @"BleManagerDisconnectPeripheral", @"BleManagerDidUpdateState"];
 }
 
-- (int) convertByteToChannelData:(int) wrap secondArg:(NSString *) timerString thirdArg:(int) stimulus {
-    
-    NSString *message = @"FileSting";
-    NSLog(@"Message : %@",message);
-    return 0;
-}
-
 - (float)formattedchannelData:(int)data arg2:(const Byte *)sensorBytes{
     // Reconstruct the 16Bit data from the 8 Bits chunks
     uint16_t formattedData = (sensorBytes[1] << 8) + sensorBytes[data];
@@ -136,8 +131,17 @@ NSString *fileNames = @"";
         channelWiseSNR_R[channel] = 20*log10(meanR/varianceR);
         channelWiseSNR_IR[channel] = 20*log10(meanIR/varianceIR);
     }
-    //
     
+    NSArray *snrValuesRArray = [NSArray arrayWithObjects:[NSNumber numberWithFloat:channelWiseSNR_R[0]],[NSNumber numberWithFloat:channelWiseSNR_R[1]],[NSNumber numberWithFloat:channelWiseSNR_R[2]],[NSNumber numberWithFloat:channelWiseSNR_R[3]],[NSNumber numberWithFloat:channelWiseSNR_R[4]],[NSNumber numberWithFloat:channelWiseSNR_R[5]],[NSNumber numberWithFloat:channelWiseSNR_R[6]],[NSNumber numberWithFloat:channelWiseSNR_R[7]],[NSNumber numberWithFloat:channelWiseSNR_R[8]],[NSNumber numberWithFloat:channelWiseSNR_R[9]],[NSNumber numberWithFloat:channelWiseSNR_R[10]],[NSNumber numberWithFloat:channelWiseSNR_R[11]],[NSNumber numberWithFloat:channelWiseSNR_R[12]],[NSNumber numberWithFloat:channelWiseSNR_R[13]],[NSNumber numberWithFloat:channelWiseSNR_R[14]],[NSNumber numberWithFloat:channelWiseSNR_R[15]], nil];
+    
+    NSString *snrValuesR = [snrValuesRArray componentsJoinedByString:@","];
+    
+    NSArray *snrValuesIRArray = [NSArray arrayWithObjects:[NSNumber numberWithFloat:channelWiseSNR_IR[0]],[NSNumber numberWithFloat:channelWiseSNR_IR[1]],[NSNumber numberWithFloat:channelWiseSNR_IR[2]],[NSNumber numberWithFloat:channelWiseSNR_IR[3]],[NSNumber numberWithFloat:channelWiseSNR_IR[4]],[NSNumber numberWithFloat:channelWiseSNR_IR[5]],[NSNumber numberWithFloat:channelWiseSNR_IR[6]],[NSNumber numberWithFloat:channelWiseSNR_IR[7]],[NSNumber numberWithFloat:channelWiseSNR_IR[8]],[NSNumber numberWithFloat:channelWiseSNR_IR[9]],[NSNumber numberWithFloat:channelWiseSNR_IR[10]],[NSNumber numberWithFloat:channelWiseSNR_IR[11]],[NSNumber numberWithFloat:channelWiseSNR_IR[12]],[NSNumber numberWithFloat:channelWiseSNR_IR[13]],[NSNumber numberWithFloat:channelWiseSNR_IR[14]],[NSNumber numberWithFloat:channelWiseSNR_IR[15]], nil];
+    
+    NSString *snrValuesIR = [snrValuesIRArray componentsJoinedByString:@","];
+    
+        NSLog(@"SNR_Red : %@",snrValuesR);
+        NSLog(@"SNR_Infrared :%@ ", snrValuesIR);
     
 }
 
@@ -243,15 +247,15 @@ NSString *fileNames = @"";
     d11 = [self formattedchannelData: 32 arg2: rawSensorBytes];
     d12 = [self formattedchannelData: 34 arg2: rawSensorBytes];
     
+    //creating a new array and setting the channel data
     double channelValuesR[] = {ch1R, ch2R, ch3R, ch4R, ch5R, ch6R, ch7R, ch8R, ch9R, ch10R, ch11R, ch12R, ch13R, ch14R, ch15R, ch16R};
     double channelValuesIR[] = {ch1IR, ch2IR, ch3IR, ch4IR, ch5IR, ch6IR, ch7IR, ch8IR, ch9IR, ch10IR, ch11IR, ch12IR, ch13IR, ch14IR, ch15IR, ch16IR};
     
+    //Set the date
     NSDateFormatter *dateFormatter=[[NSDateFormatter alloc] init];
     [dateFormatter setDateFormat:@"MM-dd-yyyy"];
     // or @"yyyy-MM-dd hh:mm:ss a" if you prefer the time with AM/PM
     NSString *formattedDate = [dateFormatter stringFromDate:[NSDate date]];
-    
-    NSLog(@"Formatted Date%@",formattedDate);
     
     NSArray *messageArray = [[NSArray alloc] initWithObjects:
                              [NSString stringWithString:formattedDate],
@@ -328,31 +332,31 @@ NSString *fileNames = @"";
     
     NSString *message = [messageArray componentsJoinedByString:@","];
     
-    NSLog(@"message--: %@",message);
-   
-    
     if (snrDataBufferSize > 99){
-
-            //Reset buffer counter to 0
-            snrDataBufferSize = 0;
-            //Get signal SNR
+        //Reset buffer counter to 0
+        snrDataBufferSize = 0;
+        //Get signal SNR
         [self getSNR];
-        
+
     }
     else{
 
-            //Build double array values with 16 channels of value
-//            valuesR[snrDataBufferSize] = channelValuesR;
-//            valuesIR[snrDataBufferSize] = channelValuesIR;
-
-            //Iterate bufferSize counter
-            snrDataBufferSize++;
-
+        //Assign double array values with 16 channels of value
+        int channelValuesRLength = (sizeof channelValuesR) / (sizeof channelValuesR[0]);
+        
+        int channelValuesIRLength = (sizeof channelValuesIR) / (sizeof channelValuesIR[0]);
+        
+        for(int i = 0;i<=channelValuesRLength;i++)
+        {
+            valuesR[snrDataBufferSize][i] = channelValuesR[i];
+        }
+        for(int i = 0;i<=channelValuesIRLength;i++)
+        {
+            valuesIR[snrDataBufferSize][i] = channelValuesIR[i];
+        }
+        //Iterate bufferSize counter
+        snrDataBufferSize++;
     }
-
-
-//    NSLog(@"CH1Rs %f", ch1Rs);
-    
     return  message;
 }
 
@@ -361,14 +365,17 @@ NSString *fileNames = @"";
     NSString *key = [self keyForPeripheral: peripheral andCharacteristic:characteristic];
     RCTResponseSenderBlock readCallback = [readCallbacks objectForKey:key];
     
+    //Create the data buffer from Value
     NSData* rawSensorData = characteristic.value;
     
-    tsLong = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0) - tsStart;
-    float timeSeconds = (float) ((float) tsLong / 1000.0);
+    //catch the seconds data
+    long currentTime = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    tsLong = currentTime  - tsStart;
+    float timeSeconds = ((float) tsLong / 1000.0);
     NSString *timerstring = [NSString stringWithFormat:@"%.02f", timeSeconds];
+    
+    //call convertByteToChannelData
     [self convertByteToChannelData:rawSensorData arg2:timerstring arg3: 0];
-    
-    
     
     if (error) {
         NSLog(@"Error %@ :%@", characteristic.UUID, error);
@@ -648,7 +655,7 @@ RCT_EXPORT_METHOD(stopScan:(nonnull RCTResponseSenderBlock)callback)
 RCT_EXPORT_METHOD(ReceivedData:(NSArray *)dataArray )
 {
     for (NSString *string in dataArray) {
-        NSLog(@"%@ Chanage array", string);
+        NSLog(@"%@ ReceivedData", string);
     }
 }
 
@@ -1014,6 +1021,86 @@ RCT_EXPORT_METHOD(readRSSI:(NSString *)deviceUUID callback:(nonnull RCTResponseS
     
 }
 
+//RCT_EXPORT_METHOD(createSensorDataCSV:(NSMutableString *)fileName)
+//{
+//    NSLog(@"createSensorDataCSV");
+//    //createSensorDataCSV
+////    NSString *getPath = [self getPathForDirectory:NSDocumentDirectory];
+////
+////    NSString *path;
+////    //Path of the document directory
+////    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+////    //append extension
+////    [fileName appendString:@".csv"];
+////    path = [[paths objectAtIndex:0] stringByAppendingPathComponent:getPath];
+////    path = [path stringByAppendingPathComponent:fileName];
+////        if ([[NSFileManager defaultManager] fileExistsAtPath:path])
+////        {
+////            NSLog(@"File Exists");
+////
+////        }
+////        else
+////        {
+////            NSLog(@"Does not Exists");
+////        }
+//
+//
+//
+//}
+
+RCT_EXPORT_METHOD(createSensorDataCSV:(NSString *)filepath
+                  contents:(NSString *)base64Content
+                  options:(NSDictionary *)options)
+{
+  NSData *data = [[NSData alloc] initWithBase64EncodedString:base64Content options:NSDataBase64DecodingIgnoreUnknownCharacters];
+
+  NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
+
+  if ([options objectForKey:@"NSFileProtectionKey"]) {
+    [attributes setValue:[options objectForKey:@"NSFileProtectionKey"] forKey:@"NSFileProtectionKey"];
+  }
+
+  BOOL success = [[NSFileManager defaultManager] createFileAtPath:filepath contents:data attributes:attributes];
+}
+
+- (NSString *)getPathForDirectory:(int)directory
+{
+  NSArray *paths = NSSearchPathForDirectoriesInDomains(directory, NSUserDomainMask, YES);
+  return [paths firstObject];
+}
+
+
+RCT_EXPORT_METHOD(StarStopDevice:(NSString *)peripheralUUID gameNumber:(int) gameNo gameState:(BOOL) eventState)
+{
+    // String peripheralUUID, int gameNo, boolean eventState
+    NSLog(@"PID : '%@'  GameNo:'%d'  GameState : '%d' ", peripheralUUID , gameNo, eventState);
+    CBPeripheral *peripheral = [self findPeripheralByUUID:peripheralUUID];
+    NSLog(@"BLEEEEE : '%@' ", peripheral);
+    
+    if(eventState)
+    {
+        NSLog(@"Event State true");
+        NSString *startNum = @"01";
+        @try {
+            NSData *dataMessage = [self hexToBytes:startNum];
+            [peripheral writeValue:dataMessage forCharacteristic:WriteCharacteristic type:CBCharacteristicWriteWithResponse];
+            [peripheral setNotifyValue: YES forCharacteristic: NotifyCharacteristic];
+         }
+         @catch (NSException *exception) {
+            NSLog(@"%@", exception.reason);
+         }
+    }
+    else
+    {
+        NSLog(@"Event State false");
+        
+        NSString *stopNum = @"00";
+        NSData *stopMessage = [self hexToBytes:stopNum];
+        [peripheral writeValue:stopMessage forCharacteristic:WriteCharacteristic type:CBCharacteristicWriteWithResponse];
+    }
+    
+}
+
 RCT_EXPORT_METHOD(retrieveServices:(NSString *)deviceUUID services:(NSArray<NSString *> *)services callback:(nonnull RCTResponseSenderBlock)callback)
 {
     NSLog(@"retrieveServices %@", services);
@@ -1271,10 +1358,29 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     NSMutableSet *servicesForPeriperal = [NSMutableSet new];
     [servicesForPeriperal addObjectsFromArray:peripheral.services];
     [retrieveServicesLatches setObject:servicesForPeriperal forKey:[peripheral uuidAsString]];
+//    for (CBService *service in peripheral.services) {
+//        NSLog(@"Service %@ %@", service.UUID, service.description);
+//        [peripheral discoverCharacteristics:nil forService:service]; // discover all is slow
+//    }
     for (CBService *service in peripheral.services) {
-        NSLog(@"Service %@ %@", service.UUID, service.description);
-        [peripheral discoverCharacteristics:nil forService:service]; // discover all is slow
-    }
+           NSLog(@"Service %@ %@", service.UUID, service.description);
+           if ([service. UUID. UUIDString isEqualToString: @"938548E6-C655-11EA-87D0-0242AC130003"])
+           {
+               NSLog(@"GETTING REQUIRED SERVICE");
+               NSLog(@"Service %@ %@", service.UUID, service.description);
+               [peripheral discoverIncludedServices:nil forService:service]; // discover included services
+               [peripheral discoverCharacteristics:nil forService:service]; // discover characteristics for service
+           }
+           
+           if ([service. UUID. UUIDString isEqualToString: @"19B10000-E8F2-537E-4F6C-D104768A1214"])
+           {
+               NSLog(@"GETTING REQUIRED SERVICE");
+               NSLog(@"Service %@ %@", service.UUID, service.description);
+               [peripheral discoverIncludedServices:nil forService:service]; // discover included services
+               [peripheral discoverCharacteristics:nil forService:service]; // discover characteristics for service
+               }
+           }
+
 }
 
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(NSError *)error {
@@ -1287,6 +1393,32 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     NSString *peripheralUUIDString = [peripheral uuidAsString];
     NSMutableSet *latch = [retrieveServicesLatches valueForKey:peripheralUUIDString];
     [latch removeObject:service];
+    
+    for (CBCharacteristic *characteristic in service. characteristics) {
+            NSLog(@"Charecteristics %@", characteristic.UUID);
+           
+            if ([characteristic.UUID.UUIDString containsString: @"77539407"]) {
+                
+                NSLog(@"Notify Characteristic %@", characteristic.UUID);
+                
+                NotifyCharacteristic = characteristic;
+                
+                //                [peripheral setNotifyValue: YES forCharacteristic: characteristic];
+                
+            }
+                if ([characteristic.UUID.UUIDString containsString: @"19B10001"]) {
+                    NSLog(@"Write Charecteristics %@", characteristic.UUID);
+                    
+                    WriteCharacteristic = characteristic;
+                    
+//                    NSData *data = [@"01" dataUsingEncoding:NSUTF8StringEncoding];
+                    
+                    
+//                    NSLog(@"WRITING DATA");
+//                    [peripheral writeValue: data forCharacteristic: characteristic
+//                    type: CBCharacteristicWriteWithResponse];
+                }
+            }
     
     if ([latch count] == 0) {
         // Call success callback for connect
