@@ -30,6 +30,9 @@ float d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12;
 double valuesR[100][16];
 double valuesIR[100][16];
 int snrDataBufferSize = 0;
+NSMutableString *csvString;
+NSString *filePath;
+//csvString
 NSString *fileNames = @"";
 CBCharacteristic *NotifyCharacteristic;
 CBCharacteristic *WriteCharacteristic;
@@ -331,6 +334,7 @@ CBCharacteristic *WriteCharacteristic;
                              nil];
     
     NSString *message = [messageArray componentsJoinedByString:@","];
+    message = [NSString stringWithFormat:@"%@%@", message, @"\r\n"];
     
     if (snrDataBufferSize > 99){
         //Reset buffer counter to 0
@@ -376,6 +380,15 @@ CBCharacteristic *WriteCharacteristic;
     
     //call convertByteToChannelData
     [self convertByteToChannelData:rawSensorData arg2:timerstring arg3: 0];
+    
+    [csvString appendString:[self convertByteToChannelData:rawSensorData arg2:timerstring arg3: 0]];
+    
+    [csvString writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSLog(@"Written DATA");
+//
+//    @"Time,Ch1R,Ch1Rs,Ch1IR,Ch1Rs,Ch2R,Ch2Rs,Ch2IR,Ch2IRs,Ch3R,Ch3Rs,Ch3IR,Ch3IRs,Ch4R,Ch4Rs,Ch4IR,Ch4IRs,Ch5R,Ch5Rs,Ch5IR,Ch5IRs,Ch6R,Ch6Rs,Ch6IR,Ch6IRs,Ch7R,Ch7Rs,Ch7IR,Ch7IRs,Ch8R,Ch8Rs,Ch8IR,Ch8IRs,Ch9R,Ch9Rs,Ch9IR,Ch9IRs,Ch10R,Ch10Rs,Ch10IR,Ch10IRs,Ch11R,Ch11Rs,Ch11IR,Ch11IRs,Ch12R,Ch12Rs,Ch12IR,Ch12IRs,Ch13R,Ch13Rs,Ch13IR,Ch13IRs,Ch14R,Ch14Rs,Ch14IR,Ch14IRs,Ch15R,Ch15Rs,Ch15IR,Ch15IRs,Ch16R,Ch16Rs,Ch16IR,Ch16IRs,Ch17R,Ch17Rs,Ch17IR,Ch17IRs,accX,accY,accZ,magX,magY,magZ,gyroX,gyroY,gyroZ,\r\n"
+    
+    
     
     if (error) {
         NSLog(@"Error %@ :%@", characteristic.UUID, error);
@@ -1021,29 +1034,29 @@ RCT_EXPORT_METHOD(readRSSI:(NSString *)deviceUUID callback:(nonnull RCTResponseS
     
 }
 
-RCT_EXPORT_METHOD(createSensorDataCSV:(NSMutableString *)fileName)
+RCT_EXPORT_METHOD(createSensorDataCSV:(NSString *)fileName)
 {
     NSLog(@"createSensorDataCSV");
     //createSensorDataCSV
-
-
-
+    csvString = [[NSMutableString alloc]initWithCapacity:0];
+    //Initial CSV
+    [csvString appendString:@"Date,Time,Ch1R,Ch1Rs,Ch1IR,Ch1Rs,Ch2R,Ch2Rs,Ch2IR,Ch2IRs,Ch3R,Ch3Rs,Ch3IR,Ch3IRs,Ch4R,Ch4Rs,Ch4IR,Ch4IRs,Ch5R,Ch5Rs,Ch5IR,Ch5IRs,Ch6R,Ch6Rs,Ch6IR,Ch6IRs,Ch7R,Ch7Rs,Ch7IR,Ch7IRs,Ch8R,Ch8Rs,Ch8IR,Ch8IRs,Ch9R,Ch9Rs,Ch9IR,Ch9IRs,Ch10R,Ch10Rs,Ch10IR,Ch10IRs,Ch11R,Ch11Rs,Ch11IR,Ch11IRs,Ch12R,Ch12Rs,Ch12IR,Ch12IRs,Ch13R,Ch13Rs,Ch13IR,Ch13IRs,Ch14R,Ch14Rs,Ch14IR,Ch14IRs,Ch15R,Ch15Rs,Ch15IR,Ch15IRs,Ch16R,Ch16Rs,Ch16IR,Ch16IRs,Ch17R,Ch17Rs,Ch17IR,Ch17IRs,accX,accY,accZ,magX,magY,magZ,gyroX,gyroY,gyroZ,\r\n"];
+    
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *documentsDirectory = [paths objectAtIndex:0];
+    filePath = [NSString stringWithFormat:@"%@/%@.%@", documentsDirectory,fileName, @"csv"];
+    NSLog(@"Doc directory:%@",documentsDirectory);
+    NSLog(@"File directory:%@",filePath);
+//    if (![[NSFileManager defaultManager] fileExistsAtPath:filePath])
+//    {
+//        NSLog(@"Create if file dosent exist");
+//        [[NSFileManager defaultManager] createFileAtPath: filePath contents:nil attributes:nil];
+//    }
+//    NSLog(@"Write with existing File");
+    [csvString writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    
 }
 
-RCT_EXPORT_METHOD(createSensorDataCSV:(NSString *)filepath
-                  contents:(NSString *)base64Content
-                  options:(NSDictionary *)options)
-{
-  NSData *data = [[NSData alloc] initWithBase64EncodedString:base64Content options:NSDataBase64DecodingIgnoreUnknownCharacters];
-
-  NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
-
-  if ([options objectForKey:@"NSFileProtectionKey"]) {
-    [attributes setValue:[options objectForKey:@"NSFileProtectionKey"] forKey:@"NSFileProtectionKey"];
-  }
-
-  BOOL success = [[NSFileManager defaultManager] createFileAtPath:filepath contents:data attributes:attributes];
-}
 
 - (NSString *)getPathForDirectory:(int)directory
 {
@@ -1059,17 +1072,19 @@ RCT_EXPORT_METHOD(StarStopDevice:(NSString *)peripheralUUID gameNumber:(int) gam
     CBPeripheral *peripheral = [self findPeripheralByUUID:peripheralUUID];
     NSLog(@"BLEEEEE : '%@' ", peripheral);
     
-    if(eventState)
+    if(eventState == YES)
     {
         NSLog(@"Event State true");
+        tsStart = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
         NSString *startNum = @"01";
         @try {
             NSData *dataMessage = [self hexToBytes:startNum];
+            NSLog(@"Write Char : '%@' ", WriteCharacteristic);
             [peripheral writeValue:dataMessage forCharacteristic:WriteCharacteristic type:CBCharacteristicWriteWithResponse];
             [peripheral setNotifyValue: YES forCharacteristic: NotifyCharacteristic];
          }
          @catch (NSException *exception) {
-            NSLog(@"%@", exception.reason);
+            NSLog(@"Error writing:%@", exception.reason);
          }
     }
     else
@@ -1079,6 +1094,9 @@ RCT_EXPORT_METHOD(StarStopDevice:(NSString *)peripheralUUID gameNumber:(int) gam
         NSString *stopNum = @"00";
         NSData *stopMessage = [self hexToBytes:stopNum];
         [peripheral writeValue:stopMessage forCharacteristic:WriteCharacteristic type:CBCharacteristicWriteWithResponse];
+        if (hasListeners) {
+            [self sendEventWithName:@"Files Generated" body:@{}];
+        }
     }
     
 }
