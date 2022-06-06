@@ -1021,32 +1021,14 @@ RCT_EXPORT_METHOD(readRSSI:(NSString *)deviceUUID callback:(nonnull RCTResponseS
     
 }
 
-//RCT_EXPORT_METHOD(createSensorDataCSV:(NSMutableString *)fileName)
-//{
-//    NSLog(@"createSensorDataCSV");
-//    //createSensorDataCSV
-////    NSString *getPath = [self getPathForDirectory:NSDocumentDirectory];
-////
-////    NSString *path;
-////    //Path of the document directory
-////    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-////    //append extension
-////    [fileName appendString:@".csv"];
-////    path = [[paths objectAtIndex:0] stringByAppendingPathComponent:getPath];
-////    path = [path stringByAppendingPathComponent:fileName];
-////        if ([[NSFileManager defaultManager] fileExistsAtPath:path])
-////        {
-////            NSLog(@"File Exists");
-////
-////        }
-////        else
-////        {
-////            NSLog(@"Does not Exists");
-////        }
-//
-//
-//
-//}
+RCT_EXPORT_METHOD(createSensorDataCSV:(NSMutableString *)fileName)
+{
+    NSLog(@"createSensorDataCSV");
+    //createSensorDataCSV
+
+
+
+}
 
 RCT_EXPORT_METHOD(createSensorDataCSV:(NSString *)filepath
                   contents:(NSString *)base64Content
