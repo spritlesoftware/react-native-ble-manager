@@ -44,9 +44,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.time.LocalDateTime;
 import java.util.Calendar;
-import java.time.format.DateTimeFormatter; 
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -639,13 +637,8 @@ public class Peripheral extends BluetoothGattCallback {
 //        gyroDataX = (float) (wrap.getShort(108) - 10000) / 100;
 //        gyroDataY = (float) (wrap.getShort(110) - 10000) / 100;
 //        gyroDataZ = (float) (wrap.getShort(112) - 10000) / 100;
-		
-		LocalDateTime myDateObj = LocalDateTime.now();  
-    		DateTimeFormatter myFormatObj = DateTimeFormatter.ofPattern("MM/dd/YYYY HH:mm:ss");  
-    		String formattedDate = myDateObj.format(myFormatObj);  
 
-		String message = formattedDate +
-						","+ timerString +
+		String message = timerString +
 						"," + ch1R +
 						"," + ch1Rs +
 						"," + ch1IR +
@@ -1295,29 +1288,27 @@ public void getSNR(){
 		}
 	}
 
-	public void StarStopDevice(File sFileName, int gameNo,boolean eventState){
+	public void StarStopDevice(File sFileName, int gameNo){
 		localFile = sFileName;
 		Log.e(BleManager.LOG_TAG, connected +"--"+eventState+"StartingDevice");
 		if (isConnected()) {
 			if (eventState){
 				Log.e(BleManager.LOG_TAG, "toggle A");
 				eventValue = hexStringToByteArray("01");
+				eventState = false;
 				tsStart= System.currentTimeMillis();
 			}
 			else{
 				Log.e(BleManager.LOG_TAG, "toggle B");
 				eventValue = hexStringToByteArray("00");
-				if(gameNo == 0){
-				    fileNames = "";
-				    fileNames = fileNames+localFile.getPath().toString()+",";	
-				}
-				else if(gameNo == 3){
+				eventState = true;
+				if(gameNo == 2){
 					try{
 						WritableMap map = Arguments.createMap();
 						map.putString("file_list", fileNames+localFile.getPath().toString());
 						Log.e(BleManager.LOG_TAG, "--"+fileNames);
 						//Log.e(BleManager.LOG_TAG, fileNames.toString());
-            					sendEvent("FilesGenerated", map);
+            sendEvent("FilesGenerated", map);
 					}catch (Exception e){
 						e.printStackTrace();
 					}

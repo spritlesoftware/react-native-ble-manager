@@ -36,6 +36,7 @@ NSString *filePath;
 NSString *fileNames = @"";
 CBCharacteristic *NotifyCharacteristic;
 CBCharacteristic *WriteCharacteristic;
+NSMutableArray *finalFileData;
 
 - (instancetype)init
 {
@@ -94,7 +95,7 @@ CBCharacteristic *WriteCharacteristic;
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[@"BleManagerDidUpdateValueForCharacteristic", @"BleManagerStopScan", @"BleManagerDiscoverPeripheral", @"BleManagerConnectPeripheral", @"BleManagerDisconnectPeripheral", @"BleManagerDidUpdateState"];
+    return @[@"BleManagerDidUpdateValueForCharacteristic", @"BleManagerStopScan", @"BleManagerDiscoverPeripheral", @"BleManagerConnectPeripheral", @"BleManagerDisconnectPeripheral", @"BleManagerDidUpdateState", @"Files Generated"];
 }
 
 - (float)formattedchannelData:(int)data arg2:(const Byte *)sensorBytes{
@@ -1055,6 +1056,13 @@ RCT_EXPORT_METHOD(createSensorDataCSV:(NSString *)fileName)
 //    NSLog(@"Write with existing File");
     [csvString writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
     
+    
+}
+
+RCT_EXPORT_METHOD(stopGameOn:(NSString *)fileName)
+{
+    
+    
 }
 
 
@@ -1090,12 +1098,25 @@ RCT_EXPORT_METHOD(StarStopDevice:(NSString *)peripheralUUID gameNumber:(int) gam
     else
     {
         NSLog(@"Event State false");
-        
         NSString *stopNum = @"00";
         NSData *stopMessage = [self hexToBytes:stopNum];
         [peripheral writeValue:stopMessage forCharacteristic:WriteCharacteristic type:CBCharacteristicWriteWithResponse];
-        if (hasListeners) {
-            [self sendEventWithName:@"Files Generated" body:@{}];
+        if(gameNo == 0)
+        {
+            finalFileData = [NSMutableArray arrayWithObjects: filePath, nil];
+            NSLog(@"%@ game0",finalFileData);
+        }
+        else if (gameNo == 3)
+        {
+            [finalFileData addObject:filePath];
+            NSString *finalFileString = [finalFileData componentsJoinedByString:@","];
+            NSLog(@"finalString :%@",finalFileString);
+            [self sendEventWithName:@"Files Generated" body:@{@"filePath":finalFileString}];
+        }
+        else
+        {
+            [finalFileData addObject:filePath];
+            NSLog(@"%@ game...",finalFileData);
         }
     }
     
