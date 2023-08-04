@@ -1,5 +1,8 @@
 package it.innove;
 
+import static com.facebook.react.common.ReactConstants.TAG;
+
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
@@ -12,15 +15,17 @@ import android.content.Context;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import androidx.annotation.Nullable;
 import android.util.Base64;
 import android.util.Log;
 import android.os.Environment;
 
 
+import androidx.annotation.Nullable;
+
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReactContext;
+import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.modules.core.RCTNativeAppEventEmitter;
@@ -29,11 +34,12 @@ import org.json.JSONException;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 import java.util.UUID;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -54,10 +60,13 @@ import java.util.List;
 
 import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static com.facebook.react.common.ReactConstants.TAG;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Peripheral wraps the BluetoothDevice and provides methods to convert to JSON.
  */
+@SuppressLint("MissingPermission")
 public class Peripheral extends BluetoothGattCallback {
 
 	private static final String CHARACTERISTIC_NOTIFICATION_CONFIG = "00002902-0000-1000-8000-00805f9b34fb";
