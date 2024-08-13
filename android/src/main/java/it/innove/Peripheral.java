@@ -9,14 +9,17 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.annotation.Nullable;
+import it.innove.CsvWriter;
+import it.innove.CustomDataBundle;
+import it.innove.DataParsingAndProcessing;
 import android.util.Base64;
 import android.util.Log;
 import android.os.Environment;
-
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Callback;
@@ -30,6 +33,7 @@ import org.json.JSONException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.HashMap;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -46,14 +50,19 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.util.Calendar;
-import java.time.format.DateTimeFormatter; 
+import java.time.format.DateTimeFormatter;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.List;
 
+import static android.bluetooth.BluetoothGatt.CONNECTION_PRIORITY_HIGH;
 import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static com.facebook.react.common.ReactConstants.TAG;
+
+import androidx.annotation.RequiresApi;
+import android.annotation.SuppressLint;
+
 
 /**
  * Peripheral wraps the BluetoothDevice and provides methods to convert to JSON.
@@ -61,18 +70,29 @@ import static com.facebook.react.common.ReactConstants.TAG;
 public class Peripheral extends BluetoothGattCallback {
 
 	private static final String CHARACTERISTIC_NOTIFICATION_CONFIG = "00002902-0000-1000-8000-00805f9b34fb";
-
-	public float ch1R, ch2R, ch3R, ch4R, ch5R, ch6R, ch7R, ch8R, ch9R, ch10R, ch11R, ch12R, ch13R, ch14R, ch15R, ch16R, ch17R;
-	public float ch1Rs, ch2Rs, ch3Rs, ch4Rs, ch5Rs, ch6Rs, ch7Rs, ch8Rs, ch9Rs, ch10Rs, ch11Rs, ch12Rs, ch13Rs, ch14Rs, ch15Rs, ch16Rs, ch17Rs;
-	public float ch1IR, ch2IR, ch3IR, ch4IR, ch5IR, ch6IR, ch7IR, ch8IR, ch9IR, ch10IR, ch11IR, ch12IR, ch13IR, ch14IR, ch15IR, ch16IR, ch17IR;
-	public float ch1IRs, ch2IRs, ch3IRs, ch4IRs, ch5IRs, ch6IRs, ch7IRs, ch8IRs, ch9IRs, ch10IRs, ch11IRs, ch12IRs, ch13IRs, ch14IRs, ch15IRs, ch16IRs, ch17IRs;
-	public float accDataX, accDataY, accDataZ, magDataX, magDataY, magDataZ, gyroDataX, gyroDataY, gyroDataZ;
-	public float d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12;
-	public double[][] valuesR = new double[100][16];
-	public double[][] valuesIR = new double[100][16];
-	public int snrDataBufferSize = 0;
+	CustomDataBundle latestDataBundle;
+	int stimValue = 0;
+	float timeStamp = 0.0f;
+	double sqi_thrUp_intensity = 2f; // set empirically
+	double sqi_thrLow_intensity = -5f; // set empirically
+	double sqi_thr_sumHbratio = 0.5f; // set empirically
+	int[] ledIntensityValues = {1,
+			100, 69, 100, 100,
+			100, 100, 100, 100,
+			100, 100, 100, 100,
+			100, 100, 100, 100, // regular power
+			20, 20, 20, 20,
+			20, 20, 20, 20,
+			20, 20, 20, 20,
+			20, 20, 20, 20}; // low power
+	long tsLast = 0;
+	long interval = 0;
+	float timeSeconds;
+	CsvWriter csvWriter;
+	String connectedDevice;
+	float lastTime = 0;
 	String fileNames = "";
-//	String[] games = {"SkipX", "BMW", "Ford", "Mazda"};
+	// String[] games = {"SkipX", "BMW", "Ford", "Mazda"};
 
 	private final BluetoothDevice device;
 	private final Map<String, NotifyBufferContainer> bufferedCharacteristics;
@@ -81,7 +101,9 @@ public class Peripheral extends BluetoothGattCallback {
 	private boolean connected = false;
 	private ReactContext reactContext;
 
-	private BluetoothGatt gatt;
+	private BluetoothGatt mConnGatt;
+
+	private int mStatus;
 
 	private Callback connectCallback;
 	private Callback retrieveServicesCallback;
@@ -90,34 +112,47 @@ public class Peripheral extends BluetoothGattCallback {
 	private Callback writeCallback;
 	private Callback registerNotifyCallback;
 	private Callback requestMTUCallback;
-	//public DataProcessing processor;
-
+	public DataParsingAndProcessing processor;
 
 	BluetoothGattCharacteristic mcharacteristic = null;
-  BluetoothGattService adcService;
-  BluetoothGattService ledService;
+	BluetoothGattService adcService;
+	BluetoothGattService ledService;
 
 	Long tsStart;
-  Long tsLong;
-  String ts;
+	Long tsLong;
+	String ts;
 
 	List<BluetoothGattCharacteristic> adc_characteristics = new ArrayList<>();
-  List<BluetoothGattCharacteristic> imu_characteristics = new ArrayList<>();
-  List<BluetoothGattCharacteristic> led_characteristics = new ArrayList<>();
-  BluetoothGattCharacteristic ledEvent_char;
+	List<BluetoothGattCharacteristic> imu_characteristics = new ArrayList<>();
+	List<BluetoothGattCharacteristic> led_characteristics = new ArrayList<>();
+	BluetoothGattCharacteristic ledEvent_char;
 
 	public boolean eventState = true;
-  public boolean streamingState = false;
-  public byte[] eventValue;
+	public boolean streamingState = false;
+	public byte[] eventValue;
 
-  public byte[] dataArray;
+	public byte[] dataArray;
 
 	File dataFile;
-  File localFile;
-  OutputStreamWriter writer;
-  String message;
+	File localFile;
+	OutputStreamWriter writer;
+	String message;
 
 	private List<byte[]> writeQueue = new ArrayList<>();
+
+	public float ch1R, ch2R, ch3R, ch4R, ch5R, ch6R, ch7R, ch8R, ch9R, ch10R, ch11R, ch12R, ch13R, ch14R, ch15R, ch16R,
+			ch17R;
+	public float ch1Rs, ch2Rs, ch3Rs, ch4Rs, ch5Rs, ch6Rs, ch7Rs, ch8Rs, ch9Rs, ch10Rs, ch11Rs, ch12Rs, ch13Rs, ch14Rs,
+			ch15Rs, ch16Rs, ch17Rs;
+	public float ch1IR, ch2IR, ch3IR, ch4IR, ch5IR, ch6IR, ch7IR, ch8IR, ch9IR, ch10IR, ch11IR, ch12IR, ch13IR, ch14IR,
+			ch15IR, ch16IR, ch17IR;
+	public float ch1IRs, ch2IRs, ch3IRs, ch4IRs, ch5IRs, ch6IRs, ch7IRs, ch8IRs, ch9IRs, ch10IRs, ch11IRs, ch12IRs,
+			ch13IRs, ch14IRs, ch15IRs, ch16IRs, ch17IRs;
+	public float accDataX, accDataY, accDataZ, magDataX, magDataY, magDataZ, gyroDataX, gyroDataY, gyroDataZ;
+	public float d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12;
+	public double[][] valuesR = new double[100][16];
+	public double[][] valuesIR = new double[100][16];
+	public int snrDataBufferSize = 0;
 
 	public Peripheral(BluetoothDevice device, int advertisingRSSI, byte[] scanRecord, ReactContext reactContext) {
 		this.device = device;
@@ -153,7 +188,7 @@ public class Peripheral extends BluetoothGattCallback {
 			this.connectCallback = callback;
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
 				Log.d(BleManager.LOG_TAG, " Is Or Greater than M $mBluetoothDevice");
-				gatt = device.connectGatt(activity, false, this, BluetoothDevice.TRANSPORT_LE);
+				mConnGatt = device.connectGatt(activity, false, this, BluetoothDevice.TRANSPORT_LE);
 			} else {
 				Log.d(BleManager.LOG_TAG, " Less than M");
 				try {
@@ -162,15 +197,15 @@ public class Peripheral extends BluetoothGattCallback {
 							BluetoothGattCallback.class, Integer.class);
 					m.setAccessible(true);
 					Integer transport = device.getClass().getDeclaredField("TRANSPORT_LE").getInt(null);
-					gatt = (BluetoothGatt) m.invoke(device, activity, false, this, transport);
+					mConnGatt = (BluetoothGatt) m.invoke(device, activity, false, this, transport);
 				} catch (Exception e) {
 					e.printStackTrace();
 					Log.d(TAG, " Catch to call normal connection");
-					gatt = device.connectGatt(activity, false, this);
+					mConnGatt = device.connectGatt(activity, false, this);
 				}
 			}
 		} else {
-			if (gatt != null) {
+			if (mConnGatt != null) {
 				callback.invoke();
 			} else {
 				callback.invoke("BluetoothGatt is null");
@@ -183,12 +218,12 @@ public class Peripheral extends BluetoothGattCallback {
 		connectCallback = null;
 		connected = false;
 		clearBuffers();
-		if (gatt != null) {
+		if (mConnGatt != null) {
 			try {
-				gatt.disconnect();
+				mConnGatt.disconnect();
 				if (force) {
-					gatt.close();
-					gatt = null;
+					mConnGatt.close();
+					mConnGatt = null;
 					sendConnectionEvent(device, "BleManagerDisconnectPeripheral", BluetoothGatt.GATT_SUCCESS);
 				}
 				Log.d(BleManager.LOG_TAG, "Disconnect");
@@ -226,15 +261,15 @@ public class Peripheral extends BluetoothGattCallback {
 		return map;
 	}
 
-	public WritableMap asWritableMap(BluetoothGatt gatt) {
+	public WritableMap asWritableMap(BluetoothGatt mConnGatt) {
 
 		WritableMap map = asWritableMap();
 
 		WritableArray servicesArray = Arguments.createArray();
 		WritableArray characteristicsArray = Arguments.createArray();
 
-		if (connected && gatt != null) {
-			for (Iterator<BluetoothGattService> it = gatt.getServices().iterator(); it.hasNext();) {
+		if (connected && mConnGatt != null) {
+			for (Iterator<BluetoothGattService> it = mConnGatt.getServices().iterator(); it.hasNext();) {
 				BluetoothGattService service = it.next();
 				WritableMap serviceMap = Arguments.createMap();
 				serviceMap.putString("uuid", UUIDHelper.uuidToString(service.getUuid()));
@@ -301,30 +336,31 @@ public class Peripheral extends BluetoothGattCallback {
 	}
 
 	public Boolean hasService(UUID uuid) {
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			return null;
 		}
-		return gatt.getService(uuid) != null;
+		return mConnGatt.getService(uuid) != null;
 	}
 
 	public static byte[] hexStringToByteArray(String s) {
-    int len = s.length();
-    byte[] data = new byte[len/2];
+		int len = s.length();
+		byte[] data = new byte[len / 2];
 
-    for(int i = 0; i < len; i+=2){
-      data[i/2] = (byte) ((Character.digit(s.charAt(i), 16) << 4) + Character.digit(s.charAt(i+1), 16));
-    }
+		for (int i = 0; i < len; i += 2) {
+			data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4) + Character.digit(s.charAt(i + 1), 16));
+		}
 
-    return data;
-  }
+		return data;
+	}
 
 	@Override
 	public void onServicesDiscovered(BluetoothGatt gatt, int status) {
 		super.onServicesDiscovered(gatt, status);
 
-		Log.d(BleManager.LOG_TAG,"onServicesDiscovered");
+		Log.d(BleManager.LOG_TAG, "onServicesDiscovered");
 
 		for (BluetoothGattService service : gatt.getServices()) {
+			Log.d(BleManager.LOG_TAG, "Services_" + service);
 
 			if ((service == null) || (service.getUuid() == null)) {
 				continue;
@@ -337,7 +373,7 @@ public class Peripheral extends BluetoothGattCallback {
 				// Loop through all the GATT services
 				for (BluetoothGattService service1 : services) {
 
-					Log.e(TAG, service1.getUuid().toString()+"###Ser");
+					Log.e(TAG, service1.getUuid().toString() + "###Ser");
 
 					// Check ADC values service
 					if (service1.getUuid().toString().toLowerCase().contains("938548e6-c655-11ea-87d0-0242ac130003")) {
@@ -345,16 +381,46 @@ public class Peripheral extends BluetoothGattCallback {
 						adc_characteristics = service1.getCharacteristics();
 
 						for (BluetoothGattCharacteristic characteristic : adc_characteristics) {
+							Log.d(BleManager.LOG_TAG, "Servicescharacteristic_" + adc_characteristics.size()
+									+ characteristic.getUuid().toString());
 
-							if (characteristic.getUuid().toString().contains("77539407-6493-4b89-985f-baaf4c0f8d86")) {
-								Log.d(BleManager.LOG_TAG, "1st Notification UUID identified");
+							// data characteristic
+							if (characteristic.getUuid().toString().equals("77539407-6493-4b89-985f-baaf4c0f8d86")) {
+								// data characteristic
+								Log.d("OnServD", "Characteristic with notification UUID identified");
 								UUID currUUID = characteristic.getUuid();
 								gatt.setCharacteristicNotification(characteristic, true);
-								BluetoothGattDescriptor desc = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
-								desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-								gatt.writeDescriptor(desc);
+								if (adc_characteristics.size() <= 1) {
+									BluetoothGattDescriptor desc = characteristic
+											.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+									desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+									gatt.writeDescriptor(desc);
+								}
 							}
 
+							// data characteristic 2
+							if (characteristic.getUuid().toString().equals("513b630c-e5fd-45b5-a678-bb2835d6c1d2")) {
+								// data characteristic
+								Log.d("OnServD", "Characteristic with notification UUID identified");
+								UUID currUUID = characteristic.getUuid();
+								gatt.setCharacteristicNotification(characteristic, true);
+							}
+
+							// led event characteristic
+							String uuid_ledEventChar = "19B10001-E8F2-537E-4F6C-D104768A1213";
+							if (characteristic.getUuid().toString().equals(uuid_ledEventChar.toLowerCase())) {
+								ledService = service1;
+								led_characteristics = service1.getCharacteristics();
+								// led characteristic
+								ledEvent_char = characteristic;
+
+								lastTime = -25;
+								if (retrieveServicesCallback != null) {
+									WritableMap map = this.asWritableMap(gatt);
+									retrieveServicesCallback.invoke(null, map);
+									retrieveServicesCallback = null;
+								}
+							}
 						}
 					}
 
@@ -365,7 +431,7 @@ public class Peripheral extends BluetoothGattCallback {
 						for (BluetoothGattCharacteristic characteristic : led_characteristics) {
 							if (characteristic.getUuid().toString().contains("19b10001-e8f2-537e-4f6c-d104768a1213")) {
 								Log.d(BleManager.LOG_TAG, "event char detected");
-								//connectionstatus.setText("CONNECTED");
+								// connectionstatus.setText("CONNECTED");
 								ledEvent_char = characteristic;
 								if (retrieveServicesCallback != null) {
 									WritableMap map = this.asWritableMap(gatt);
@@ -375,31 +441,32 @@ public class Peripheral extends BluetoothGattCallback {
 							}
 						}
 					}
+
 				}
 
 			}
 
 		}
-		String message = "MTU Request result: " + String.valueOf(gatt.requestMtu(129));
+		String message = "MTU Request result: " + String.valueOf(gatt.requestMtu(517));
 		Log.d(TAG, message);
 
 		// if (retrieveServicesCallback != null) {
-		// 	WritableMap map = this.asWritableMap(gatt);
-		// 	retrieveServicesCallback.invoke(null, map);
-		// 	retrieveServicesCallback = null;
+		// WritableMap map = this.asWritableMap(gatt);
+		// retrieveServicesCallback.invoke(null, map);
+		// retrieveServicesCallback = null;
 		// }
 	}
 
 	@Override
-	public void onConnectionStateChange(BluetoothGatt gatta, int status, int newState) {
+	public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
 
 		Log.d(BleManager.LOG_TAG, "onConnectionStateChange to " + newState + " on peripheral: " + device.getAddress()
 				+ " with status " + status);
 
-		gatt = gatta;
+		mConnGatt = gatt;
 
 		if (status != BluetoothGatt.GATT_SUCCESS) {
-		    gatt.close();
+			mConnGatt.close();
 		}
 
 		if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -418,6 +485,12 @@ public class Peripheral extends BluetoothGattCallback {
 			this.disconnect(true);
 
 			sendConnectionEvent(device, "BleManagerDisconnectPeripheral", status);
+			WritableMap map = Arguments.createMap();
+			map.putString("file_list", fileNames + localFile.getPath().toString());
+			Log.e(BleManager.LOG_TAG, "--" + fileNames);
+			sendEvent("CancelledFilesGenerated", map);
+			ledIntensityValues = new int[] { 1, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+					8 };
 			List<Callback> callbacks = Arrays.asList(writeCallback, retrieveServicesCallback, readRSSICallback,
 					readCallback, registerNotifyCallback, requestMTUCallback);
 			for (Callback currentCallback : callbacks) {
@@ -452,157 +525,123 @@ public class Peripheral extends BluetoothGattCallback {
 		return b & 0xFF;
 	}
 
+
+
+	@RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
 	@Override
-	public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-		dataArray = characteristic.getValue();
-		tsLong = System.currentTimeMillis() - tsStart;
-		float timeSeconds = (float) ((float) tsLong / 1000.0);
-		String timerstring = String.format("%.2f", timeSeconds);
-		message = convertByteToChannelData(ByteBuffer.wrap(dataArray), timerstring, 0);
-		writeFileOnInternalStorage(message);
-		Log.d(BleManager.LOG_TAG, message);
+	public void onCharacteristicChanged(BluetoothGatt mConnGatt, BluetoothGattCharacteristic characteristic) {
+		if (characteristic.getUuid().toString().toLowerCase().equals("77539407-6493-4b89-985f-baaf4c0f8d86") ||
+		characteristic.getUuid().toString().toLowerCase().equals("513b630c-e5fd-45b5-a678-bb2835d6c1d2")){
+			dataArray = characteristic.getValue();
+			Log.e(TAG, "dataarray: " + dataArray);
+
+			ByteBuffer wrap = ByteBuffer.wrap(dataArray);
+			wrap.order(ByteOrder.LITTLE_ENDIAN);
+			Log.e(TAG, "sendings: " + wrap);
+
+			// Parse and process all data
+			latestDataBundle = processor.convertByteToChannelData(ByteBuffer.wrap(dataArray));
+
+			Log.d(BleManager.LOG_TAG, " is ready?: " + latestDataBundle.isDataReady);
+			if(latestDataBundle.isDataReady){
+				refreshCurrentChannelDisplayItems(latestDataBundle);
+				try{
+					if (csvWriter != null){
+						// Store the data to a file
+						logDataToFile(latestDataBundle);
+					}
+				} catch (Exception e) {
+					throw new RuntimeException(e);
+				}
+			}
+		}
 	}
 
-	public void writeFileOnInternalStorage(String value){
-
-		try {
-			FileWriter writer = new FileWriter(localFile, true);
-			writer.append(value);
-			writer.flush();
-			writer.close();
-		} catch (Exception e){
-			e.printStackTrace();
-		}
-  }
-
-	public static void copy(File origin, File dest) throws IOException {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      Files.copy(origin.toPath(), dest.toPath());
-    }
-  }
-
-	public void copyFileToExternalStorage() throws IOException {
-
-		Log.d(BleManager.LOG_TAG, "copyFileToExternalStorage");
-
-
-    // Reference:
-    // https://stackoverflow.com/questions/41782162/how-to-write-file-into-dcim-directory-exactly-where-camera-does
-    String data_folder = "BBOL_fNIRS";
-    File f = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), data_folder);
-    if (!f.exists()) {
-      f.mkdirs();
-    }
-
-    DateFormat df = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss");
-    String date = df.format(Calendar.getInstance().getTime());
-    String fname = date + ".csv";
-
-		Log.e(BleManager.LOG_TAG, "fname");
-
-
-    dataFile = new File(f, fname);
-    
-    // if(!dataFile.exists()){
-    //  dataFile.createNewFile();
-    // }
-
-    copy(localFile, dataFile);
-
-    localFile.delete();
-
-    Log.e(BleManager.LOG_TAG, fname);
-
-    //connectionstatus.setText("FILE SAVED!");
-
-  }
-
-
-	public String convertByteToChannelData(ByteBuffer wrap,String timerString, int stimulus){
+	public String convertByteToChannelDataController2(ByteBuffer wrap, String timerString, int stimulus) {
 
 		wrap.order(ByteOrder.LITTLE_ENDIAN);
 
 		// Set 1 Channels
 		// Channels 1, 5, 6, 11, 16, 17
 		ch1R = (float) ((wrap.getShort(0) / 4095.) * 3.3);
-		ch1Rs =  (float) ((wrap.getShort(4) / 4095.) * 3.3);
-		ch5R =  (float) ((wrap.getShort(12) / 4095.) * 3.3);
-		ch5Rs =  (float) ((wrap.getShort(4) / 4095.) * 3.3);
-		ch6R =  (float) ((wrap.getShort(6) / 4095.) * 3.3);
-		ch6Rs =  (float) ((wrap.getShort(4) / 4095.) * 3.3);
-		ch11R =  (float) ((wrap.getShort(2) / 4095.) * 3.3);
-		ch11Rs =  (float) ((wrap.getShort(8) / 4095.) * 3.3);
-		ch16R =  (float) ((wrap.getShort(14) / 4095.) * 3.3);
-		ch16Rs =  (float) ((wrap.getShort(8) / 4095.) * 3.3);
-		ch17R =  (float) ((wrap.getShort(16) / 4095.) * 3.3);
-		ch17Rs =  (float) ((wrap.getShort(10) / 4095.) * 3.3);
+		ch1Rs = (float) ((wrap.getShort(4) / 4095.) * 3.3);
+		ch5R = (float) ((wrap.getShort(12) / 4095.) * 3.3);
+		ch5Rs = (float) ((wrap.getShort(4) / 4095.) * 3.3);
+		ch6R = (float) ((wrap.getShort(6) / 4095.) * 3.3);
+		ch6Rs = (float) ((wrap.getShort(4) / 4095.) * 3.3);
+		ch11R = (float) ((wrap.getShort(2) / 4095.) * 3.3);
+		ch11Rs = (float) ((wrap.getShort(8) / 4095.) * 3.3);
+		ch16R = (float) ((wrap.getShort(14) / 4095.) * 3.3);
+		ch16Rs = (float) ((wrap.getShort(8) / 4095.) * 3.3);
+		ch17R = (float) ((wrap.getShort(16) / 4095.) * 3.3);
+		ch17Rs = (float) ((wrap.getShort(10) / 4095.) * 3.3);
 
-		ch1IR =  (float) ((wrap.getShort(18) / 4095.) * 3.3);
-		ch1IRs =  (float) ((wrap.getShort(22) / 4095.) * 3.3);
-		ch5IR =  (float) ((wrap.getShort(30) / 4095.) * 3.3);
-		ch5IRs =  (float) ((wrap.getShort(22) / 4095.) * 3.3);
-		ch6IR =  (float) ((wrap.getShort(24) / 4095.) * 3.3);
-		ch6IRs  =  (float) ((wrap.getShort(22) / 4095.) * 3.3);
-		ch11IR =  (float) ((wrap.getShort(20) / 4095.) * 3.3);
-		ch11IRs  =  (float) ((wrap.getShort(26) / 4095.) * 3.3);
-		ch16IR =  (float) ((wrap.getShort(32) / 4095.) * 3.3);
-		ch16IRs  =  (float) ((wrap.getShort(26) / 4095.) * 3.3);
-		ch17IR =  (float) ((wrap.getShort(34) / 4095.) * 3.3);
-		ch17IRs  =  (float) ((wrap.getShort(28) / 4095.) * 3.3);
+		ch1IR = (float) ((wrap.getShort(18) / 4095.) * 3.3);
+		ch1IRs = (float) ((wrap.getShort(22) / 4095.) * 3.3);
+		ch5IR = (float) ((wrap.getShort(30) / 4095.) * 3.3);
+		ch5IRs = (float) ((wrap.getShort(22) / 4095.) * 3.3);
+		ch6IR = (float) ((wrap.getShort(24) / 4095.) * 3.3);
+		ch6IRs = (float) ((wrap.getShort(22) / 4095.) * 3.3);
+		ch11IR = (float) ((wrap.getShort(20) / 4095.) * 3.3);
+		ch11IRs = (float) ((wrap.getShort(26) / 4095.) * 3.3);
+		ch16IR = (float) ((wrap.getShort(32) / 4095.) * 3.3);
+		ch16IRs = (float) ((wrap.getShort(26) / 4095.) * 3.3);
+		ch17IR = (float) ((wrap.getShort(34) / 4095.) * 3.3);
+		ch17IRs = (float) ((wrap.getShort(28) / 4095.) * 3.3);
 
 		// Set 2 Long Channels
 		// Channels 4, 7, 12, 13, 14, 15
 
-		ch4R =  (float) ((wrap.getShort(38) / 4095.) * 3.3);
-		ch4Rs =  (float) ((wrap.getShort(40) / 4095.) * 3.3);
-		ch7R =  (float) ((wrap.getShort(36) / 4095.) * 3.3);
-		ch7Rs  =  (float) ((wrap.getShort(42) / 4095.) * 3.3);
-		ch12R =  (float) ((wrap.getShort(46) / 4095.) * 3.3);
-		ch12Rs  =  (float) ((wrap.getShort(40) / 4095.) * 3.3);
-		ch13R =  (float) ((wrap.getShort(52) / 4095.) * 3.3);
-		ch13Rs  =  (float) ((wrap.getShort(40) / 4095.) * 3.3);
-		ch14R =  (float) ((wrap.getShort(48) / 4095.) * 3.3);
-		ch14Rs  =  (float) ((wrap.getShort(42) / 4095.) * 3.3);
-		ch15R =  (float) ((wrap.getShort(50) / 4095.) * 3.3);
-		ch15Rs  =  (float) ((wrap.getShort(44) / 4095.) * 3.3);
+		ch4R = (float) ((wrap.getShort(38) / 4095.) * 3.3);
+		ch4Rs = (float) ((wrap.getShort(40) / 4095.) * 3.3);
+		ch7R = (float) ((wrap.getShort(36) / 4095.) * 3.3);
+		ch7Rs = (float) ((wrap.getShort(42) / 4095.) * 3.3);
+		ch12R = (float) ((wrap.getShort(46) / 4095.) * 3.3);
+		ch12Rs = (float) ((wrap.getShort(40) / 4095.) * 3.3);
+		ch13R = (float) ((wrap.getShort(52) / 4095.) * 3.3);
+		ch13Rs = (float) ((wrap.getShort(40) / 4095.) * 3.3);
+		ch14R = (float) ((wrap.getShort(48) / 4095.) * 3.3);
+		ch14Rs = (float) ((wrap.getShort(42) / 4095.) * 3.3);
+		ch15R = (float) ((wrap.getShort(50) / 4095.) * 3.3);
+		ch15Rs = (float) ((wrap.getShort(44) / 4095.) * 3.3);
 
-		ch4IR =  (float) ((wrap.getShort(56) / 4095.) * 3.3);
-		ch4IRs  =  (float) ((wrap.getShort(58) / 4095.) * 3.3);
-		ch7IR =  (float) ((wrap.getShort(54) / 4095.) * 3.3);
-		ch7IRs  =  (float) ((wrap.getShort(60) / 4095.) * 3.3);
-		ch12IR =  (float) ((wrap.getShort(64) / 4095.) * 3.3);
-		ch12IRs  =  (float) ((wrap.getShort(58) / 4095.) * 3.3);
-		ch13IR =  (float) ((wrap.getShort(70) / 4095.) * 3.3);
-		ch13IRs  =  (float) ((wrap.getShort(58) / 4095.) * 3.3);
-		ch14IR =  (float) ((wrap.getShort(66) / 4095.) * 3.3);
-		ch14IRs  =  (float) ((wrap.getShort(60) / 4095.) * 3.3);
-		ch15IR =  (float) ((wrap.getShort(68) / 4095.) * 3.3);
-		ch15IRs  =  (float) ((wrap.getShort(62) / 4095.) * 3.3);
+		ch4IR = (float) ((wrap.getShort(56) / 4095.) * 3.3);
+		ch4IRs = (float) ((wrap.getShort(58) / 4095.) * 3.3);
+		ch7IR = (float) ((wrap.getShort(54) / 4095.) * 3.3);
+		ch7IRs = (float) ((wrap.getShort(60) / 4095.) * 3.3);
+		ch12IR = (float) ((wrap.getShort(64) / 4095.) * 3.3);
+		ch12IRs = (float) ((wrap.getShort(58) / 4095.) * 3.3);
+		ch13IR = (float) ((wrap.getShort(70) / 4095.) * 3.3);
+		ch13IRs = (float) ((wrap.getShort(58) / 4095.) * 3.3);
+		ch14IR = (float) ((wrap.getShort(66) / 4095.) * 3.3);
+		ch14IRs = (float) ((wrap.getShort(60) / 4095.) * 3.3);
+		ch15IR = (float) ((wrap.getShort(68) / 4095.) * 3.3);
+		ch15IRs = (float) ((wrap.getShort(62) / 4095.) * 3.3);
 
 		// Set 3 Long Channels
 		// Channels 2, 3,8, 9, 10
 
-		ch2R =  (float) ((wrap.getShort(72) / 4095.) * 3.3);
-		ch2Rs =  (float) ((wrap.getShort(76) / 4095.) * 3.3);
-		ch3R =  (float) ((wrap.getShort(74) / 4095.) * 3.3);
-		ch3Rs =  (float) ((wrap.getShort(76) / 4095.) * 3.3);
-		ch8R =  (float) ((wrap.getShort(78) / 4095.) * 3.3);
-		ch8Rs =  (float) ((wrap.getShort(76) / 4095.) * 3.3);
-		ch9R =  (float) ((wrap.getShort(82) / 4095.) * 3.3);
-		ch9Rs =  (float) ((wrap.getShort(76) / 4095.) * 3.3);
-		ch10R =  (float) ((wrap.getShort(80) / 4095.) * 3.3);
-		ch10Rs =  (float) ((wrap.getShort(76) / 4095.) * 3.3);
+		ch2R = (float) ((wrap.getShort(72) / 4095.) * 3.3);
+		ch2Rs = (float) ((wrap.getShort(76) / 4095.) * 3.3);
+		ch3R = (float) ((wrap.getShort(74) / 4095.) * 3.3);
+		ch3Rs = (float) ((wrap.getShort(76) / 4095.) * 3.3);
+		ch8R = (float) ((wrap.getShort(78) / 4095.) * 3.3);
+		ch8Rs = (float) ((wrap.getShort(76) / 4095.) * 3.3);
+		ch9R = (float) ((wrap.getShort(82) / 4095.) * 3.3);
+		ch9Rs = (float) ((wrap.getShort(76) / 4095.) * 3.3);
+		ch10R = (float) ((wrap.getShort(80) / 4095.) * 3.3);
+		ch10Rs = (float) ((wrap.getShort(76) / 4095.) * 3.3);
 
-		ch2IR =  (float) ((wrap.getShort(84) / 4095.) * 3.3);
-		ch2IRs =  (float) ((wrap.getShort(88) / 4095.) * 3.3);
-		ch3IR =  (float) ((wrap.getShort(86) / 4095.) * 3.3);
-		ch3IRs =  (float) ((wrap.getShort(88) / 4095.) * 3.3);
-		ch8IR =  (float) ((wrap.getShort(90) / 4095.) * 3.3);
-		ch8IRs =  (float) ((wrap.getShort(88) / 4095.) * 3.3);
-		ch9IR =  (float) ((wrap.getShort(94) / 4095.) * 3.3);
-		ch9IRs =  (float) ((wrap.getShort(88) / 4095.) * 3.3);
-		ch10IR =  (float) ((wrap.getShort(92) / 4095.) * 3.3);
-		ch10IRs =  (float) ((wrap.getShort(88) / 4095.) * 3.3);
+		ch2IR = (float) ((wrap.getShort(84) / 4095.) * 3.3);
+		ch2IRs = (float) ((wrap.getShort(88) / 4095.) * 3.3);
+		ch3IR = (float) ((wrap.getShort(86) / 4095.) * 3.3);
+		ch3IRs = (float) ((wrap.getShort(88) / 4095.) * 3.3);
+		ch8IR = (float) ((wrap.getShort(90) / 4095.) * 3.3);
+		ch8IRs = (float) ((wrap.getShort(88) / 4095.) * 3.3);
+		ch9IR = (float) ((wrap.getShort(94) / 4095.) * 3.3);
+		ch9IRs = (float) ((wrap.getShort(88) / 4095.) * 3.3);
+		ch10IR = (float) ((wrap.getShort(92) / 4095.) * 3.3);
+		ch10IRs = (float) ((wrap.getShort(88) / 4095.) * 3.3);
 
 		d1 = (float) ((wrap.getShort(0) / 4095.) * 3.3);
 		d2 = (float) ((wrap.getShort(2) / 4095.) * 3.3);
@@ -629,249 +668,355 @@ public class Peripheral extends BluetoothGattCallback {
 		// dataValueDisplays.get(9).setText(String.valueOf(d10));
 		// dataValueDisplays.get(10).setText(String.valueOf(d11));
 		// dataValueDisplays.get(11).setText(String.valueOf(d12));
-//
-//        accDataX = (float) (wrap.getShort(96) - 10000) / 100;
-//        accDataY = (float) (wrap.getShort(98) - 10000) / 100;
-//        accDataZ = (float) (wrap.getShort(100) - 10000) / 100;
-//        magDataX = (float) (wrap.getShort(102) - 10000) / 100;
-//        magDataY = (float) (wrap.getShort(104) - 10000) / 100;
-//        magDataZ = (float) (wrap.getShort(106) - 10000) / 100;
-//        gyroDataX = (float) (wrap.getShort(108) - 10000) / 100;
-//        gyroDataY = (float) (wrap.getShort(110) - 10000) / 100;
-//        gyroDataZ = (float) (wrap.getShort(112) - 10000) / 100;
-		
-		LocalDateTime myDateObj = LocalDateTime.now();  
-    		DateTimeFormatter myFormatObj = DateTimeFormatter.ofPattern("MM/dd/YYYY HH:mm:ss");  
-    		String formattedDate = myDateObj.format(myFormatObj);  
+		//
+		// accDataX = (float) (wrap.getShort(96) - 10000) / 100;
+		// accDataY = (float) (wrap.getShort(98) - 10000) / 100;
+		// accDataZ = (float) (wrap.getShort(100) - 10000) / 100;
+		// magDataX = (float) (wrap.getShort(102) - 10000) / 100;
+		// magDataY = (float) (wrap.getShort(104) - 10000) / 100;
+		// magDataZ = (float) (wrap.getShort(106) - 10000) / 100;
+		// gyroDataX = (float) (wrap.getShort(108) - 10000) / 100;
+		// gyroDataY = (float) (wrap.getShort(110) - 10000) / 100;
+		// gyroDataZ = (float) (wrap.getShort(112) - 10000) / 100;
+
+		LocalDateTime myDateObj = LocalDateTime.now();
+		DateTimeFormatter myFormatObj = DateTimeFormatter.ofPattern("MM/dd/YYYY HH:mm:ss");
+		String formattedDate = myDateObj.format(myFormatObj);
 
 		String message = formattedDate +
-						","+ timerString +
-						"," + ch1R +
-						"," + ch1Rs +
-						"," + ch1IR +
-						"," + ch1Rs +
-						"," + ch2R +
-						"," + ch2Rs +
-						"," + ch2IR +
-						"," + ch2IRs +
-						"," + ch3R +
-						"," + ch3Rs +
-						"," + ch3IR +
-						"," + ch3IRs +
-						"," + ch4R +
-						"," + ch4Rs +
-						"," + ch4IR +
-						"," + ch4IRs +
-						"," + ch5R +
-						"," + ch5Rs +
-						"," + ch5IR +
-						"," + ch5IRs +
-						"," + ch6R +
-						"," + ch6Rs +
-						"," + ch6IR +
-						"," + ch6IRs +
-						"," + ch7R +
-						"," + ch7Rs +
-						"," + ch7IR +
-						"," + ch7IRs +
-						"," + ch8R +
-						"," + ch8Rs +
-						"," + ch8IR +
-						"," + ch8IRs +
-						"," + ch9R +
-						"," + ch9Rs +
-						"," + ch9IR +
-						"," + ch9IRs +
-						"," + ch10R +
-						"," + ch10Rs +
-						"," + ch10IR +
-						"," + ch10IRs +
-						"," + ch11R +
-						"," + ch11Rs +
-						"," + ch11IR +
-						"," + ch11IRs +
-						"," + ch12R +
-						"," + ch12Rs +
-						"," + ch12IR +
-						"," + ch12IRs +
-						"," + ch13R +
-						"," + ch13Rs +
-						"," + ch13IR +
-						"," + ch13IRs +
-						"," + ch14R +
-						"," + ch14Rs +
-						"," + ch14IR +
-						"," + ch14IRs +
-						"," + ch15R +
-						"," + ch15Rs +
-						"," + ch15IR +
-						"," + ch15IRs +
-						"," + ch16R +
-						"," + ch16Rs +
-						"," + ch16IR +
-						"," + ch16IRs +
-						"," + ch17R +
-						"," + ch17Rs +
-						"," + ch17IR +
-						"," + ch17IRs +
-//                "," + String.valueOf(accDataX) +
-//                "," + String.valueOf(accDataY) +
-//                "," + String.valueOf(accDataZ) +
-//                "," + String.valueOf(magDataX) +
-//                "," + String.valueOf(magDataY) +
-//                "," + String.valueOf(magDataZ) +
-//                "," + String.valueOf(gyroDataX) +
-//                "," + String.valueOf(gyroDataY) +
-//                "," + String.valueOf(gyroDataZ) +
-						"\r\n";
+				"," + timerString +
+				"," + ch1R +
+				"," + ch1Rs +
+				"," + ch1IR +
+				"," + ch1Rs +
+				"," + ch2R +
+				"," + ch2Rs +
+				"," + ch2IR +
+				"," + ch2IRs +
+				"," + ch3R +
+				"," + ch3Rs +
+				"," + ch3IR +
+				"," + ch3IRs +
+				"," + ch4R +
+				"," + ch4Rs +
+				"," + ch4IR +
+				"," + ch4IRs +
+				"," + ch5R +
+				"," + ch5Rs +
+				"," + ch5IR +
+				"," + ch5IRs +
+				"," + ch6R +
+				"," + ch6Rs +
+				"," + ch6IR +
+				"," + ch6IRs +
+				"," + ch7R +
+				"," + ch7Rs +
+				"," + ch7IR +
+				"," + ch7IRs +
+				"," + ch8R +
+				"," + ch8Rs +
+				"," + ch8IR +
+				"," + ch8IRs +
+				"," + ch9R +
+				"," + ch9Rs +
+				"," + ch9IR +
+				"," + ch9IRs +
+				"," + ch10R +
+				"," + ch10Rs +
+				"," + ch10IR +
+				"," + ch10IRs +
+				"," + ch11R +
+				"," + ch11Rs +
+				"," + ch11IR +
+				"," + ch11IRs +
+				"," + ch12R +
+				"," + ch12Rs +
+				"," + ch12IR +
+				"," + ch12IRs +
+				"," + ch13R +
+				"," + ch13Rs +
+				"," + ch13IR +
+				"," + ch13IRs +
+				"," + ch14R +
+				"," + ch14Rs +
+				"," + ch14IR +
+				"," + ch14IRs +
+				"," + ch15R +
+				"," + ch15Rs +
+				"," + ch15IR +
+				"," + ch15IRs +
+				"," + ch16R +
+				"," + ch16Rs +
+				"," + ch16IR +
+				"," + ch16IRs +
+				"," + ch17R +
+				"," + ch17Rs +
+				"," + ch17IR +
+				"," + ch17IRs +
+				// "," + String.valueOf(accDataX) +
+				// "," + String.valueOf(accDataY) +
+				// "," + String.valueOf(accDataZ) +
+				// "," + String.valueOf(magDataX) +
+				// "," + String.valueOf(magDataY) +
+				// "," + String.valueOf(magDataZ) +
+				// "," + String.valueOf(gyroDataX) +
+				// "," + String.valueOf(gyroDataY) +
+				// "," + String.valueOf(gyroDataZ) +
+				"\r\n";
 
-		double[] channelValuesR = {ch1R, ch2R, ch3R, ch4R, ch5R, ch6R, ch7R, ch8R, ch9R, ch10R, ch11R, ch12R, ch13R, ch14R, ch15R, ch16R};
-		double[] channelValuesIR = {ch1IR, ch2IR, ch3IR, ch4IR, ch5IR, ch6IR, ch7IR, ch8IR, ch9IR, ch10IR, ch11IR, ch12IR, ch13IR, ch14IR, ch15IR, ch16IR};
+		double[] channelValuesR = { ch1R, ch2R, ch3R, ch4R, ch5R, ch6R, ch7R, ch8R, ch9R, ch10R, ch11R, ch12R, ch13R,
+				ch14R, ch15R, ch16R };
+		double[] channelValuesIR = { ch1IR, ch2IR, ch3IR, ch4IR, ch5IR, ch6IR, ch7IR, ch8IR, ch9IR, ch10IR, ch11IR,
+				ch12IR, ch13IR, ch14IR, ch15IR, ch16IR };
 
-		if (snrDataBufferSize > 99){
+		if (snrDataBufferSize > 99) {
 
-				//Reset buffer counter to 0
-				snrDataBufferSize = 0;
+			// Reset buffer counter to 0
+			snrDataBufferSize = 0;
 
-				//Get signal SNR
-				getSNR();
+			// Get signal SNR
+			getSNR();
+
+		} else {
+
+			// Build double array values with 16 channels of value
+			valuesR[snrDataBufferSize] = channelValuesR;
+			valuesIR[snrDataBufferSize] = channelValuesIR;
+
+			// Iterate bufferSize counter
+			snrDataBufferSize++;
 
 		}
-		else{
 
-				//Build double array values with 16 channels of value
-				valuesR[snrDataBufferSize] = channelValuesR;
-				valuesIR[snrDataBufferSize] = channelValuesIR;
-
-				//Iterate bufferSize counter
-				snrDataBufferSize++;
-
-		}
-
-		//Log.d("fNIRSdata", message);
+		// Log.d("fNIRSdata", message);
 
 		return message;
 
 		// Log to data file
-		//writeFileOnInternalStorage(localFile, message);
+		// writeFileOnInternalStorage(localFile, message);
 
-}
+	}
 
-public void getSNR(){
+	public void getSNR() {
 
-		double meanR =0, meanIR = 0;
+		double meanR = 0, meanIR = 0;
 		double[] channelWiseSNR_R = new double[16];
 		double[] channelWiseSNR_IR = new double[16];
 
-		for (int channel = 0; channel<=15; channel++){
+		for (int channel = 0; channel <= 15; channel++) {
 
-				// Get DC component
+			// Get DC component
 
-				for (int i = 0; i<=99; i++){
-						meanR = meanR + valuesR[i][channel];
-						meanIR = meanIR + valuesIR[i][channel];
-				}
+			for (int i = 0; i <= 99; i++) {
+				meanR = meanR + valuesR[i][channel];
+				meanIR = meanIR + valuesIR[i][channel];
+			}
 
-				meanR = meanR / 100;
-				meanIR = meanIR / 100;
+			meanR = meanR / 100;
+			meanIR = meanIR / 100;
 
-				// Get Variance of AC component
-				double varianceR = 0;
-				double varianceIR = 0;
-				for (int i = 0; i <= 99; i++) {
-						varianceR += Math.pow(valuesR[i][channel] - meanR, 2);
-						varianceIR += Math.pow(valuesIR[i][channel] - meanIR, 2);
-				}
-				varianceR = varianceR/100;
-				varianceIR = varianceIR/100;
+			// Get Variance of AC component
+			double varianceR = 0;
+			double varianceIR = 0;
+			for (int i = 0; i <= 99; i++) {
+				varianceR += Math.pow(valuesR[i][channel] - meanR, 2);
+				varianceIR += Math.pow(valuesIR[i][channel] - meanIR, 2);
+			}
+			varianceR = varianceR / 100;
+			varianceIR = varianceIR / 100;
 
-				channelWiseSNR_R[channel] = 20*Math.log10(meanR/varianceR);
-				channelWiseSNR_IR[channel] = 20*Math.log10(meanIR/varianceIR);
+			channelWiseSNR_R[channel] = 20 * Math.log10(meanR / varianceR);
+			channelWiseSNR_IR[channel] = 20 * Math.log10(meanIR / varianceIR);
 
 		}
 
 		String snrValuesR = channelWiseSNR_R[0] + "," +
-						channelWiseSNR_R[1] + "," +
-						channelWiseSNR_R[2] + "," +
-						channelWiseSNR_R[3] + "," +
-						channelWiseSNR_R[4] + "," +
-						channelWiseSNR_R[5] + "," +
-						channelWiseSNR_R[6] + "," +
-						channelWiseSNR_R[7] + "," +
-						channelWiseSNR_R[8] + "," +
-						channelWiseSNR_R[9] + "," +
-						channelWiseSNR_R[10] + "," +
-						channelWiseSNR_R[11] + "," +
-						channelWiseSNR_R[12] + "," +
-						channelWiseSNR_R[13] + "," +
-						channelWiseSNR_R[14] + "," +
-						channelWiseSNR_R[15];
+				channelWiseSNR_R[1] + "," +
+				channelWiseSNR_R[2] + "," +
+				channelWiseSNR_R[3] + "," +
+				channelWiseSNR_R[4] + "," +
+				channelWiseSNR_R[5] + "," +
+				channelWiseSNR_R[6] + "," +
+				channelWiseSNR_R[7] + "," +
+				channelWiseSNR_R[8] + "," +
+				channelWiseSNR_R[9] + "," +
+				channelWiseSNR_R[10] + "," +
+				channelWiseSNR_R[11] + "," +
+				channelWiseSNR_R[12] + "," +
+				channelWiseSNR_R[13] + "," +
+				channelWiseSNR_R[14] + "," +
+				channelWiseSNR_R[15];
 
 		String snrValuesIR = channelWiseSNR_IR[0] + "," +
-						channelWiseSNR_IR[1] + "," +
-						channelWiseSNR_IR[2] + "," +
-						channelWiseSNR_IR[3] + "," +
-						channelWiseSNR_IR[4] + "," +
-						channelWiseSNR_IR[5] + "," +
-						channelWiseSNR_IR[6] + "," +
-						channelWiseSNR_IR[7] + "," +
-						channelWiseSNR_IR[8] + "," +
-						channelWiseSNR_IR[9] + "," +
-						channelWiseSNR_IR[10] + "," +
-						channelWiseSNR_IR[11] + "," +
-						channelWiseSNR_IR[12] + "," +
-						channelWiseSNR_IR[13] + "," +
-						channelWiseSNR_IR[14] + "," +
-						channelWiseSNR_IR[15];
+				channelWiseSNR_IR[1] + "," +
+				channelWiseSNR_IR[2] + "," +
+				channelWiseSNR_IR[3] + "," +
+				channelWiseSNR_IR[4] + "," +
+				channelWiseSNR_IR[5] + "," +
+				channelWiseSNR_IR[6] + "," +
+				channelWiseSNR_IR[7] + "," +
+				channelWiseSNR_IR[8] + "," +
+				channelWiseSNR_IR[9] + "," +
+				channelWiseSNR_IR[10] + "," +
+				channelWiseSNR_IR[11] + "," +
+				channelWiseSNR_IR[12] + "," +
+				channelWiseSNR_IR[13] + "," +
+				channelWiseSNR_IR[14] + "," +
+				channelWiseSNR_IR[15];
 
 		Log.d("SNR_Red", snrValuesR);
 		Log.d("SNR_Infrared", snrValuesIR);
 
-}
+	}
+
+	public void refreshCurrentChannelDisplayItems(CustomDataBundle latestDataBundle){
+
+		// Timestamp error hardcode fix
+		if (latestDataBundle.getDurationDataRoundSeconds() > 0.130){
+			timeStamp = timeStamp + 0.121f;
+		}
+		else{
+			timeStamp = timeStamp + latestDataBundle.getDurationDataRoundSeconds();
+		}
+	}
+
+	public void logDataToFile(CustomDataBundle latestDataBundle) {
+
+		// Create the latest
+		String dataLineItem = timeStamp + ", " + stimValue;
+
+		// Check which checkboxes are available:
+		for (int s = 0; s < 8; s++){
+
+			// log data to file
+			// header
+
+			for (int d = 0; d < 16; d++){
+				// Append S-D header item
+				dataLineItem = dataLineItem
+						+ "," + latestDataBundle.getDataArray()[s*2][d]
+						+ ", " + latestDataBundle.getDataArray()[s*2 + 1][d]
+						+ ", " + ledIntensityValues[(s+1)*2-1] + "," + ledIntensityValues[(s+1)*2]
+						+ "," + latestDataBundle.getDataArray()[s*2 + 16][d]
+						+ ", " + latestDataBundle.getDataArray()[s*2 + 1 + 16][d]
+						+ ", " + ledIntensityValues[(s+1)*2-1 + 16] + "," + ledIntensityValues[(s+1)*2 + 16];
+			}
+
+		}
+
+		// Add the dark current measurements
+		for (int d = 0; d < 16; d++){
+			dataLineItem = dataLineItem + "," + latestDataBundle.getDarkCurrentMeasurements()[d];
+		}
+
+		// Add carriage return
+		dataLineItem = dataLineItem + "\r\n";
+
+		Log.d(BleManager.LOG_TAG, "DATALINEITEM: " + dataLineItem);
+
+		// Append the data to the file
+		csvWriter.append(dataLineItem);
+
+	}
+
+	public void writeFileOnInternalStorage(String value) {
+
+		try {
+			FileWriter writer = new FileWriter(localFile, true);
+			writer.append(value);
+			writer.flush();
+			writer.close();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public static void copy(File origin, File dest) throws IOException {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+			Files.copy(origin.toPath(), dest.toPath());
+		}
+	}
+
+	public void copyFileToExternalStorage() throws IOException {
+
+		Log.d(BleManager.LOG_TAG, "copyFileToExternalStorage");
+
+		// Reference:
+		// https://stackoverflow.com/questions/41782162/how-to-write-file-into-dcim-directory-exactly-where-camera-does
+		String data_folder = "BBOL_fNIRS";
+		File f = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), data_folder);
+		if (!f.exists()) {
+			f.mkdirs();
+		}
+
+		DateFormat df = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss");
+		String date = df.format(Calendar.getInstance().getTime());
+		String fname = date + ".csv";
+
+		Log.e(BleManager.LOG_TAG, "fname");
+
+		dataFile = new File(f, fname);
+
+		// if(!dataFile.exists()){
+		// dataFile.createNewFile();
+		// }
+
+		copy(localFile, dataFile);
+
+		localFile.delete();
+
+		Log.e(BleManager.LOG_TAG, fname);
+
+		// connectionstatus.setText("FILE SAVED!");
+
+	}
 
 	//////
 
 	// @Override
-	// public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-	// 	super.onCharacteristicChanged(gatt, characteristic);
-	// 	try {
-	// 		String charString = characteristic.getUuid().toString();
-	// 		String service = characteristic.getService().getUuid().toString();
-	// 		NotifyBufferContainer buffer = this.bufferedCharacteristics
-	// 				.get(this.bufferedCharacteristicsKey(service, charString));
-	// 		byte[] dataValue = characteristic.getValue();
-	// 		if (buffer != null) {
-	// 			buffer.put(dataValue);
-	// 			// Log.d(BleManager.LOG_TAG, "onCharacteristicChanged-buffering: " +
-	// 			// buffer.size() + " from peripheral: " + device.getAddress());
+	// public void onCharacteristicChanged(BluetoothGatt mConnGatt,
+	// BluetoothGattCharacteristic characteristic) {
+	// super.onCharacteristicChanged(mConnGatt, characteristic);
+	// try {
+	// String charString = characteristic.getUuid().toString();
+	// String service = characteristic.getService().getUuid().toString();
+	// NotifyBufferContainer buffer = this.bufferedCharacteristics
+	// .get(this.bufferedCharacteristicsKey(service, charString));
+	// byte[] dataValue = characteristic.getValue();
+	// if (buffer != null) {
+	// buffer.put(dataValue);
+	// // Log.d(BleManager.LOG_TAG, "onCharacteristicChanged-buffering: " +
+	// // buffer.size() + " from peripheral: " + device.getAddress());
 
-	// 			if (buffer.size().equals(buffer.maxCount)) {
-	// 				Log.d(BleManager.LOG_TAG, "onCharacteristicChanged sending buffered data " + buffer.size());
+	// if (buffer.size().equals(buffer.maxCount)) {
+	// Log.d(BleManager.LOG_TAG, "onCharacteristicChanged sending buffered data " +
+	// buffer.size());
 
-	// 				// send'm and reset
-	// 				dataValue = buffer.items.array();
-	// 				buffer.resetBuffer();
-	// 			} else {
-	// 				return;
-	// 			}
-	// 		}
-	// 		Log.d(BleManager.LOG_TAG, "onCharacteristicChanged: " + BleManager.bytesToHex(dataValue)
-	// 				+ " from peripheral: " + device.getAddress());
-	// 		WritableMap map = Arguments.createMap();
-	// 		map.putString("peripheral", device.getAddress());
-	// 		map.putString("characteristic", charString);
-	// 		map.putString("service", service);
-	// 		map.putArray("value", BleManager.bytesToWritableArray(dataValue));
-	// 		sendEvent("BleManagerDidUpdateValueForCharacteristic", map);
+	// // send'm and reset
+	// dataValue = buffer.items.array();
+	// buffer.resetBuffer();
+	// } else {
+	// return;
+	// }
+	// }
+	// Log.d(BleManager.LOG_TAG, "onCharacteristicChanged: " +
+	// BleManager.bytesToHex(dataValue)
+	// + " from peripheral: " + device.getAddress());
+	// WritableMap map = Arguments.createMap();
+	// map.putString("peripheral", device.getAddress());
+	// map.putString("characteristic", charString);
+	// map.putString("service", service);
+	// map.putArray("value", BleManager.bytesToWritableArray(dataValue));
+	// sendEvent("BleManagerDidUpdateValueForCharacteristic", map);
 
-	// 	} catch (Exception e) {
-	// 		Log.d(BleManager.LOG_TAG, "onCharacteristicChanged ERROR: " + e.toString());
-	// 	}
+	// } catch (Exception e) {
+	// Log.d(BleManager.LOG_TAG, "onCharacteristicChanged ERROR: " + e.toString());
+	// }
 	// }
 
 	@Override
-	public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-		super.onCharacteristicRead(gatt, characteristic, status);
+	public void onCharacteristicRead(BluetoothGatt mConnGatt, BluetoothGattCharacteristic characteristic, int status) {
+		super.onCharacteristicRead(mConnGatt, characteristic, status);
 		Log.d(BleManager.LOG_TAG, "onCharacteristicRead " + characteristic);
 
 		if (readCallback != null) {
@@ -892,46 +1037,48 @@ public void getSNR(){
 	}
 
 	@Override
-	// public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-	// 	super.onCharacteristicWrite(gatt, characteristic, status);
+	// public void onCharacteristicWrite(BluetoothGatt mConnGatt,
+	// BluetoothGattCharacteristic characteristic, int status) {
+	// super.onCharacteristicWrite(mConnGatt, characteristic, status);
 
-	// 	if (writeCallback != null) {
+	// if (writeCallback != null) {
 
-	// 		if (writeQueue.size() > 0) {
-	// 			byte[] data = writeQueue.get(0);
-	// 			writeQueue.remove(0);
-	// 			doWrite(characteristic, data);
-	// 		} else {
+	// if (writeQueue.size() > 0) {
+	// byte[] data = writeQueue.get(0);
+	// writeQueue.remove(0);
+	// doWrite(characteristic, data);
+	// } else {
 
-	// 			if (status == BluetoothGatt.GATT_SUCCESS) {
-	// 				writeCallback.invoke();
-	// 			} else {
-	// 				Log.e(BleManager.LOG_TAG, "Error onCharacteristicWrite:" + status);
-	// 				writeCallback.invoke("Error writing status: " + status);
-	// 			}
-
-	// 			writeCallback = null;
-	// 		}
-	// 	} else {
-	// 		Log.e(BleManager.LOG_TAG, "No callback on write");
-	// 	}
+	// if (status == BluetoothGatt.GATT_SUCCESS) {
+	// writeCallback.invoke();
+	// } else {
+	// Log.e(BleManager.LOG_TAG, "Error onCharacteristicWrite:" + status);
+	// writeCallback.invoke("Error writing status: " + status);
 	// }
 
-	public void onCharacteristicWrite(BluetoothGatt gatt,BluetoothGattCharacteristic characteristic, int status) {
+	// writeCallback = null;
+	// }
+	// } else {
+	// Log.e(BleManager.LOG_TAG, "No callback on write");
+	// }
+	// }
+
+	public void onCharacteristicWrite(BluetoothGatt mConnGatt, BluetoothGattCharacteristic characteristic, int status) {
 		if (status != BluetoothGatt.GATT_SUCCESS) {
 			Log.e(BleManager.LOG_TAG, "Failed write, retrying: " + status);
-			//gatt.writeCharacteristic(characteristic);
+			// mConnGatt.writeCharacteristic(characteristic);
 			writeCallback.invoke("Error writing status: " + status);
 		}
-		Log.e(BleManager.LOG_TAG+" onCharacteristicWrite",""+ characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT8, 0));
-		super.onCharacteristicWrite(gatt, characteristic, status);
-		gatt.requestMtu(129);
+		Log.e(BleManager.LOG_TAG + " onCharacteristicWrite",
+				"" + characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT8, 0));
+		super.onCharacteristicWrite(mConnGatt, characteristic, status);
+		mConnGatt.requestMtu(517);
 		writeCallback.invoke();
 	}
 
 	@Override
-	public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-		super.onDescriptorWrite(gatt, descriptor, status);
+	public void onDescriptorWrite(BluetoothGatt mConnGatt, BluetoothGattDescriptor descriptor, int status) {
+		super.onDescriptorWrite(mConnGatt, descriptor, status);
 		if (registerNotifyCallback != null) {
 			if (status == BluetoothGatt.GATT_SUCCESS) {
 				registerNotifyCallback.invoke();
@@ -948,8 +1095,8 @@ public void getSNR(){
 	}
 
 	@Override
-	public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
-		super.onReadRemoteRssi(gatt, rssi, status);
+	public void onReadRemoteRssi(BluetoothGatt mConnGatt, int rssi, int status) {
+		super.onReadRemoteRssi(mConnGatt, rssi, status);
 		if (readRSSICallback != null) {
 			if (status == BluetoothGatt.GATT_SUCCESS) {
 				updateRssi(rssi);
@@ -979,15 +1126,15 @@ public void getSNR(){
 		}
 		Log.d(BleManager.LOG_TAG, "setNotify");
 
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			callback.invoke("BluetoothGatt is null");
 			return;
 		}
-		BluetoothGattService service = gatt.getService(serviceUUID);
+		BluetoothGattService service = mConnGatt.getService(serviceUUID);
 		BluetoothGattCharacteristic characteristic = findNotifyCharacteristic(service, characteristicUUID);
 
 		if (characteristic != null) {
-			if (gatt.setCharacteristicNotification(characteristic, notify)) {
+			if (mConnGatt.setCharacteristicNotification(characteristic, notify)) {
 
 				if (buffer > 1) {
 					Log.d(BleManager.LOG_TAG, "Characteristic buffering " + characteristicUUID + " count:" + buffer);
@@ -1015,7 +1162,7 @@ public void getSNR(){
 
 					try {
 						registerNotifyCallback = callback;
-						if (gatt.writeDescriptor(descriptor)) {
+						if (mConnGatt.writeDescriptor(descriptor)) {
 							Log.d(BleManager.LOG_TAG, "setNotify complete");
 						} else {
 							registerNotifyCallback = null;
@@ -1093,19 +1240,19 @@ public void getSNR(){
 			callback.invoke("Device is not connected", null);
 			return;
 		}
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			callback.invoke("BluetoothGatt is null", null);
 			return;
 		}
 
-		BluetoothGattService service = gatt.getService(serviceUUID);
+		BluetoothGattService service = mConnGatt.getService(serviceUUID);
 		BluetoothGattCharacteristic characteristic = findReadableCharacteristic(service, characteristicUUID);
 
 		if (characteristic == null) {
 			callback.invoke("Characteristic " + characteristicUUID + " not found.", null);
 		} else {
 			readCallback = callback;
-			if (!gatt.readCharacteristic(characteristic)) {
+			if (!mConnGatt.readCharacteristic(characteristic)) {
 				readCallback = null;
 				callback.invoke("Read failed", null);
 			}
@@ -1117,14 +1264,14 @@ public void getSNR(){
 			callback.invoke("Device is not connected", null);
 			return;
 		}
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			callback.invoke("BluetoothGatt is null", null);
 			return;
 		}
 
 		readRSSICallback = callback;
 
-		if (!gatt.readRemoteRssi()) {
+		if (!mConnGatt.readRemoteRssi()) {
 			readCallback = null;
 			callback.invoke("Read RSSI failed", null);
 		}
@@ -1132,9 +1279,9 @@ public void getSNR(){
 
 	public void refreshCache(Callback callback) {
 		try {
-			Method localMethod = gatt.getClass().getMethod("refresh", new Class[0]);
+			Method localMethod = mConnGatt.getClass().getMethod("refresh", new Class[0]);
 			if (localMethod != null) {
-				boolean res = ((Boolean) localMethod.invoke(gatt, new Object[0])).booleanValue();
+				boolean res = ((Boolean) localMethod.invoke(mConnGatt, new Object[0])).booleanValue();
 				callback.invoke(null, res);
 			} else {
 				callback.invoke("Could not refresh cache for device.");
@@ -1146,16 +1293,17 @@ public void getSNR(){
 	}
 
 	public void retrieveServices(Callback callback) {
+		Log.d("isConnected ", isConnected() + "mConnGatt" + mConnGatt);
 		if (!isConnected()) {
 			callback.invoke("Device is not connected", null);
 			return;
 		}
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			callback.invoke("BluetoothGatt is null", null);
 			return;
 		}
 		this.retrieveServicesCallback = callback;
-		gatt.discoverServices();
+		mConnGatt.discoverServices();
 	}
 
 	// Some peripherals re-use UUIDs for multiple characteristics so we need to
@@ -1187,7 +1335,7 @@ public void getSNR(){
 	public boolean doWrite(BluetoothGattCharacteristic characteristic, byte[] data) {
 		characteristic.setValue(data);
 
-		if (!gatt.writeCharacteristic(characteristic)) {
+		if (!mConnGatt.writeCharacteristic(characteristic)) {
 			Log.d(BleManager.LOG_TAG, "Error on doWrite");
 			return false;
 		}
@@ -1200,10 +1348,10 @@ public void getSNR(){
 			callback.invoke("Device is not connected", null);
 			return;
 		}
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			callback.invoke("BluetoothGatt is null");
 		} else {
-			BluetoothGattService service = gatt.getService(serviceUUID);
+			BluetoothGattService service = mConnGatt.getService(serviceUUID);
 			BluetoothGattCharacteristic characteristic = findWritableCharacteristic(service, characteristicUUID,
 					writeType);
 
@@ -1295,84 +1443,121 @@ public void getSNR(){
 		}
 	}
 
-	public void StarStopDevice(File sFileName, int gameNo,boolean eventState){
+	public void StarStopDevice(File sFileName, int gameNo, boolean eventState, CsvWriter csvWriter1, String device) {
 		localFile = sFileName;
-		Log.e(BleManager.LOG_TAG, connected +"--"+eventState+"StartingDevice");
+		csvWriter = csvWriter1;
+		connectedDevice = device;
+		Log.e(BleManager.LOG_TAG, connected + "--" + eventState + "StartingDevice" + gameNo);
+		processor = new DataParsingAndProcessing(sqi_thrUp_intensity, sqi_thrLow_intensity, sqi_thr_sumHbratio,
+				ledIntensityValues);
+
 		if (isConnected()) {
-			if (eventState){
+			if (eventState) {
 				Log.e(BleManager.LOG_TAG, "toggle A");
-				eventValue = hexStringToByteArray("01");
-				tsStart= System.currentTimeMillis();
-			}
-			else{
-				Log.e(BleManager.LOG_TAG, "toggle B");
-				eventValue = hexStringToByteArray("00");
-				if(gameNo == 0){
-				    fileNames = "";
-				    fileNames = fileNames+localFile.getPath().toString()+",";	
+				if (device.equalsIgnoreCase("Controller3")) {
+					eventValue = hexStringToByteArray(prepareCommandString(ledIntensityValues));
+					Log.e(BleManager.LOG_TAG, "ledIntensityValues" + String.valueOf(eventValue.length));
+					Log.e("onclick", String.valueOf(eventValue.length));
+					eventState = false;
+
+					tsStart = Long.valueOf(7777);
+				} else {
+					eventValue = hexStringToByteArray("01");
+					tsStart = System.currentTimeMillis();
 				}
-				else if(gameNo == 3){
-					try{
+				// tsStart= System.currentTimeMillis();
+			} else {
+				Log.e(BleManager.LOG_TAG, "toggle B");
+				eventValue = hexStringToByteArray("03");
+				timeStamp = 0;
+				// ledIntensityValues = new int[] { 1, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+				// 		8 };
+				if (gameNo == 0) {
+					fileNames = "";
+					fileNames = fileNames + localFile.getPath().toString() + ",";
+				} else if (gameNo == 3) {
+					try {
 						WritableMap map = Arguments.createMap();
-						map.putString("file_list", fileNames+localFile.getPath().toString());
-						Log.e(BleManager.LOG_TAG, "--"+fileNames);
-						//Log.e(BleManager.LOG_TAG, fileNames.toString());
-            					sendEvent("FilesGenerated", map);
-					}catch (Exception e){
+						map.putString("file_list", fileNames + localFile.getPath().toString());
+						Log.e(BleManager.LOG_TAG, "--" + fileNames);
+						// Log.e(BleManager.LOG_TAG, fileNames.toString());
+						sendEvent("FilesGenerated", map);
+					} catch (Exception e) {
 						e.printStackTrace();
 					}
-				}
-				else{
-					fileNames = fileNames+localFile.getPath().toString()+",";
+				} else {
+					fileNames = fileNames + localFile.getPath().toString() + ",";
 				}
 				// try {
-				// 	copyFileToExternalStorage();
+				// copyFileToExternalStorage();
 				// } catch (IOException e) {
-				// 	Log.e(TAG, "FILE NOT COPIED");
-				// 	e.printStackTrace();
+				// Log.e(TAG, "FILE NOT COPIED");
+				// e.printStackTrace();
 				// }
 			}
 			Log.e(BleManager.LOG_TAG, String.valueOf(eventValue));
 			writeCharacteristic(ledEvent_char, eventValue);
-		}
-		else{
+		} else {
 			Log.d(BleManager.LOG_TAG, "NOT CONNECTED");
 		}
 	}
 
-	public void writeCharacteristic(BluetoothGattCharacteristic characteristic, byte[] value){
+	public void QuitSession() {
+		// ledIntensityValues = new int[] { 1, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+		// 		8 };
+	}
+
+	public String prepareCommandString(int[] intArray) {
+		StringBuilder hexString = new StringBuilder();
+
+		for (int intValue : intArray) {
+			// Ensure the integer value is within the valid range (0-8)
+			if (intValue < 0 || intValue > 100) {
+				throw new IllegalArgumentException("Integer value out of range: " + intValue);
+			}
+
+			// Convert the integer to a two-character hexadecimal string
+			String hexValue = String.format("%02X", intValue);
+
+			// Append the hex value to the result string
+			hexString.append(hexValue);
+		}
+
+		return hexString.toString();
+	}
+
+	public void writeCharacteristic(BluetoothGattCharacteristic characteristic, byte[] value) {
 
 		Log.e(BleManager.LOG_TAG, "writeCharacteristic");
 
-    //check mBluetoothGatt is available
-    if (gatt == null) {
-      Log.e(TAG, "lost connection");
-    }
+		// check mBluetoothGatt is available
+		if (mConnGatt == null) {
+			Log.e(TAG, "lost connection");
+		}
 
-    if (ledService == null){
-      Log.e(TAG, "service not found!");
-    }
+		if (ledService == null) {
+			Log.e(TAG, "service not found!");
+		}
 
-    if (characteristic == null) {
-      Log.e(TAG, "char not found!");
-    }
+		if (characteristic == null) {
+			Log.e(TAG, "char not found!");
+		}
+		Log.d(TAG, ByteBuffer.wrap(value) + " writeCharacteristic-value");
+		characteristic.setValue(value);
+		// boolean status = mConnGatt.writeCharacteristic(characteristic);
+		Log.d(TAG, String.valueOf(characteristic) + " writeCharacteristic-char-value");
+		mConnGatt.writeCharacteristic(characteristic);
 
-    characteristic.setValue(value);
-    //boolean status = mConnGatt.writeCharacteristic(characteristic);
-    Log.d(TAG, String.valueOf(value)+" writeCharacteristic-value");
-    Log.d(TAG,String.valueOf(characteristic)+" writeCharacteristic-char-value");
-    gatt.writeCharacteristic(characteristic);
-
-  }
+	}
 
 	public void requestConnectionPriority(int connectionPriority, Callback callback) {
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			callback.invoke("BluetoothGatt is null", null);
 			return;
 		}
 
 		if (Build.VERSION.SDK_INT >= LOLLIPOP) {
-			boolean status = gatt.requestConnectionPriority(connectionPriority);
+			boolean status = mConnGatt.requestConnectionPriority(connectionPriority);
 			callback.invoke(null, status);
 		} else {
 			callback.invoke("Requesting connection priority requires at least API level 21", null);
@@ -1385,22 +1570,22 @@ public void getSNR(){
 			return;
 		}
 
-		if (gatt == null) {
+		if (mConnGatt == null) {
 			callback.invoke("BluetoothGatt is null", null);
 			return;
 		}
 
 		if (Build.VERSION.SDK_INT >= LOLLIPOP) {
 			requestMTUCallback = callback;
-			gatt.requestMtu(mtu);
+			mConnGatt.requestMtu(mtu);
 		} else {
 			callback.invoke("Requesting MTU requires at least API level 21", null);
 		}
 	}
 
 	@Override
-	public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
-		super.onMtuChanged(gatt, mtu, status);
+	public void onMtuChanged(BluetoothGatt mConnGatt, int mtu, int status) {
+		super.onMtuChanged(mConnGatt, mtu, status);
 		if (requestMTUCallback != null) {
 			if (status == BluetoothGatt.GATT_SUCCESS) {
 				requestMTUCallback.invoke(null, mtu);

@@ -13,10 +13,9 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 
 import androidx.annotation.Nullable;
-
+import it.innove.CsvWriter;
 import android.util.Log;
 import java.io.IOException;
-
 
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.BaseActivityEventListener;
@@ -32,6 +31,9 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.modules.core.RCTNativeAppEventEmitter;
 
 import java.lang.reflect.Method;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,15 +47,22 @@ import static android.app.Activity.RESULT_OK;
 import static android.bluetooth.BluetoothProfile.GATT;
 import static android.os.Build.VERSION_CODES.LOLLIPOP;
 
-
+import android.os.Environment;
 
 class BleManager extends ReactContextBaseJavaModule {
 
     File localFile;
-
+    CsvWriter csvWriter;
 
     public static final String LOG_TAG = "ReactNativeBleManager";
     private static final int ENABLE_REQUEST = 539;
+    int[] ledIntensityValues = { 1,
+            8, 8, 8, 8, // regular power sources
+            8, 8, 8, 8,
+            8, 8, 8, 8,
+            8, 8, 8, 8,
+            8, 8, 8, 8, // low power sources
+            8, 8, 8, 8 };
 
     private class BondRequest {
         private String uuid;
@@ -188,7 +197,7 @@ class BleManager extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void scan(ReadableArray serviceUUIDs, final int scanSeconds, boolean allowDuplicates, ReadableMap options,
-                     Callback callback) {
+            Callback callback) {
         Log.d(LOG_TAG, "scan");
         if (getBluetoothAdapter() == null) {
             Log.d(LOG_TAG, "No bluetooth support");
@@ -201,7 +210,7 @@ class BleManager extends ReactContextBaseJavaModule {
 
         synchronized (peripherals) {
             for (Iterator<Map.Entry<String, Peripheral>> iterator = peripherals.entrySet().iterator(); iterator
-                    .hasNext(); ) {
+                    .hasNext();) {
                 Map.Entry<String, Peripheral> entry = iterator.next();
                 if (!entry.getValue().isConnected()) {
                     iterator.remove();
@@ -253,7 +262,8 @@ class BleManager extends ReactContextBaseJavaModule {
             return;
         } else if (peripheral.getDevice().createBond()) {
             Log.d(LOG_TAG, "Request bond successful for: " + peripheralUUID);
-            bondRequest = new BondRequest(peripheralUUID, peripheralPin, callback); // request bond success, waiting for boradcast
+            bondRequest = new BondRequest(peripheralUUID, peripheralPin, callback); // request bond success, waiting for
+                                                                                    // boradcast
             return;
         }
 
@@ -282,8 +292,6 @@ class BleManager extends ReactContextBaseJavaModule {
 
     }
 
-
-
     @ReactMethod
     public void connect(String peripheralUUID, Callback callback) {
         Log.d(LOG_TAG, "Connect to: " + peripheralUUID);
@@ -297,53 +305,134 @@ class BleManager extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void StarStopDevice(String peripheralUUID, int gameNo, boolean eventState){
-        //Peripheral peripheral = peripherals.startingDevice();
+    public void StarStopDevice(String peripheralUUID, int gameNo, boolean eventState, String device) {
+        // Peripheral peripheral = peripherals.startingDevice();
         Log.d(LOG_TAG, "startDevice: " + peripheralUUID);
         Peripheral peripheral = peripherals.get(peripheralUUID);
-        peripheral.StarStopDevice(localFile,gameNo,eventState);
+        Log.d(LOG_TAG, "eventState: " + eventState);
+        peripheral.StarStopDevice(localFile, gameNo, eventState, csvWriter, device);
+    }
+
+    @ReactMethod
+    public void QuitSession(String peripheralUUID) {
+        Peripheral peripheral = peripherals.get(peripheralUUID);
+        peripheral.QuitSession();
     }
 
     // @ReactMethod
     // public void generateFiles(String deviceUUID, Callback callback) {
-    //     Log.d(LOG_TAG, "generateFiles " + deviceUUID);
-    //     Peripheral peripheral = peripherals.get(deviceUUID);
-    //     if (peripheral != null) {
-    //         peripheral.getFilesList(callback);
-    //     } else
-    //         callback.invoke("Files not found", null);
+    // Log.d(LOG_TAG, "generateFiles " + deviceUUID);
+    // Peripheral peripheral = peripherals.get(deviceUUID);
+    // if (peripheral != null) {
+    // peripheral.getFilesList(callback);
+    // } else
+    // callback.invoke("Files not found", null);
     // }
 
-    public void writeFileOnInternalStorage(File sFileName, String value){
+    public void writeFileOnInternalStorage(File sFileName, String value) {
 
         try {
-          FileWriter writer = new FileWriter(sFileName, false);
-          writer.append(value);
-          writer.flush();
-          writer.close();
-        } catch (Exception e){
-          e.printStackTrace();
+            FileWriter writer = new FileWriter(sFileName, false);
+            writer.append(value);
+            writer.flush();
+            writer.close();
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
     @ReactMethod
-    public void createSensorDataCSV(String fileName){
-        Log.d(LOG_TAG, "createSensorDataCSV");
+    public void createSensorDataCSV(String fileName, String deviceConnected) {
+        Log.d(LOG_TAG, "createSensorDataCSV" + deviceConnected);
 
-        localFile = new File(reactContext.getFilesDir(), fileName+".csv");
-        String row_labels = "Date,Time,Ch1R,Ch1Rs,Ch1IR,Ch1Rs,Ch2R,Ch2Rs,Ch2IR,Ch2IRs,Ch3R,Ch3Rs,Ch3IR,Ch3IRs,Ch4R,Ch4Rs,Ch4IR,Ch4IRs,Ch5R,Ch5Rs,Ch5IR,Ch5IRs,Ch6R,Ch6Rs,Ch6IR,Ch6IRs,Ch7R,Ch7Rs,Ch7IR,Ch7IRs,Ch8R,Ch8Rs,Ch8IR,Ch8IRs,Ch9R,Ch9Rs,Ch9IR,Ch9IRs,Ch10R,Ch10Rs,Ch10IR,Ch10IRs,Ch11R,Ch11Rs,Ch11IR,Ch11IRs,Ch12R,Ch12Rs,Ch12IR,Ch12IRs,Ch13R,Ch13Rs,Ch13IR,Ch13IRs,Ch14R,Ch14Rs,Ch14IR,Ch14IRs,Ch15R,Ch15Rs,Ch15IR,Ch15IRs,Ch16R,Ch16Rs,Ch16IR,Ch16IRs,Ch17R,Ch17Rs,Ch17IR,Ch17IRs,accX,accY,accZ,magX,magY,magZ,gyroX,gyroY,gyroZ" + "\r\n";
-        if (!localFile.exists()) {
-            try {
-                localFile.createNewFile();
-                Log.e(LOG_TAG, "DATA FILE CREATED");
-                
-            } catch (IOException e) {
-                Log.e(LOG_TAG, "DATA FILE COULD NOT BE CREATED");
-                e.printStackTrace();
-            }
+        // localFile = new File(reactContext.getFilesDir(), fileName + ".csv");
+        // String row_labels =
+        // "Date,Time,Ch1R,Ch1Rs,Ch1IR,Ch1Rs,Ch2R,Ch2Rs,Ch2IR,Ch2IRs,Ch3R,Ch3Rs,Ch3IR,Ch3IRs,Ch4R,Ch4Rs,Ch4IR,Ch4IRs,Ch5R,Ch5Rs,Ch5IR,Ch5IRs,Ch6R,Ch6Rs,Ch6IR,Ch6IRs,Ch7R,Ch7Rs,Ch7IR,Ch7IRs,Ch8R,Ch8Rs,Ch8IR,Ch8IRs,Ch9R,Ch9Rs,Ch9IR,Ch9IRs,Ch10R,Ch10Rs,Ch10IR,Ch10IRs,Ch11R,Ch11Rs,Ch11IR,Ch11IRs,Ch12R,Ch12Rs,Ch12IR,Ch12IRs,Ch13R,Ch13Rs,Ch13IR,Ch13IRs,Ch14R,Ch14Rs,Ch14IR,Ch14IRs,Ch15R,Ch15Rs,Ch15IR,Ch15IRs,Ch16R,Ch16Rs,Ch16IR,Ch16IRs,Ch17R,Ch17Rs,Ch17IR,Ch17IRs,accX,accY,accZ,magX,magY,magZ,gyroX,gyroY,gyroZ"
+        // + "\r\n";
+        // if (!localFile.exists()) {
+        // try {
+        // localFile.createNewFile();
+        // Log.e(LOG_TAG, "DATA FILE CREATED");
+
+        // } catch (IOException e) {
+        // Log.e(LOG_TAG, "DATA FILE COULD NOT BE CREATED");
+        // e.printStackTrace();
+        // }
+        // }
+        // Log.d(LOG_TAG, localFile.getPath());
+        // writeFileOnInternalStorage(localFile, row_labels);
+
+        initCSVFile(fileName, deviceConnected);
+    }
+
+    private void initCSVFile(String fileName, String deviceConnected) {
+        Log.d(LOG_TAG, "createSensorDataCSV");
+        // Create new data log file
+        String row_labels = "Date,Time,Ch1R,Ch1Rs,Ch1IR,Ch1Rs,Ch2R,Ch2Rs,Ch2IR,Ch2IRs,Ch3R,Ch3Rs,Ch3IR,Ch3IRs,Ch4R,Ch4Rs,Ch4IR,Ch4IRs,Ch5R,Ch5Rs,Ch5IR,Ch5IRs,Ch6R,Ch6Rs,Ch6IR,Ch6IRs,Ch7R,Ch7Rs,Ch7IR,Ch7IRs,Ch8R,Ch8Rs,Ch8IR,Ch8IRs,Ch9R,Ch9Rs,Ch9IR,Ch9IRs,Ch10R,Ch10Rs,Ch10IR,Ch10IRs,Ch11R,Ch11Rs,Ch11IR,Ch11IRs,Ch12R,Ch12Rs,Ch12IR,Ch12IRs,Ch13R,Ch13Rs,Ch13IR,Ch13IRs,Ch14R,Ch14Rs,Ch14IR,Ch14IRs,Ch15R,Ch15Rs,Ch15IR,Ch15IRs,Ch16R,Ch16Rs,Ch16IR,Ch16IRs,Ch17R,Ch17Rs,Ch17IR,Ch17IRs,accX,accY,accZ,magX,magY,magZ,gyroX,gyroY,gyroZ"
+                + "\r\n";
+        if (deviceConnected.equalsIgnoreCase("Controller2")) {
+            Log.d(LOG_TAG, "createSensorDataCSV" + "Controller2");
+            csvWriter = new CsvWriter(getDataFileName(fileName), row_labels);
+        } else {
+            csvWriter = new CsvWriter(getDataFileName(fileName), getHeader());
         }
-        Log.d(LOG_TAG,localFile.getPath());
-        writeFileOnInternalStorage(localFile, row_labels);
+        try {
+            localFile = csvWriter.getOrCreateFile();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
+
+    public String getDataFileName(String fileName) {
+
+        // Reference:
+        // https://stackoverflow.com/questions/41782162/how-to-write-file-into-dcim-directory-exactly-where-camera-does
+        String data_folder = "/BrainGame";
+        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                data_folder);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+
+        String fname = dir.getAbsoluteFile().toString() + "/" + fileName + ".csv";
+
+        Log.d(LOG_TAG, "fname" + fname);
+        return fname;
+    }
+
+    public String getHeader(){
+
+        String header = "Time,Stimulus";
+
+        // Check which checkboxes are available:
+        for (int s = 1; s <= 8; s++){
+
+            int currSource = s;
+
+            for (int d = 0; d < 16; d++){
+
+                    // Append S-D header item
+                    header = header + ", " + "S" + String.valueOf(currSource) + "-D" + String.valueOf(d+1) + "-740nm-RP"
+                            + ", " + "S" + String.valueOf(currSource) + "-D" + String.valueOf(d+1) + "-850nm-RP"
+                            + ","  + "ledPowerLevel-740nm-RP, ledPowerLevel-850nm-RP"
+                            + ", " + "S" + String.valueOf(currSource) + "-D" + String.valueOf(d+1) + "-740nm-LP"
+                            + ", " + "S" + String.valueOf(currSource) + "-D" + String.valueOf(d+1) + "-850nm-LP"
+                            + ", " + "ledPowerLevel-740nm-LP, ledPowerLevel-850nm-LP";
+
+            }
+
+        }
+
+        // Add dark current values
+        for (int d = 0; d < 16; d++){
+            header = header + ",D" + String.valueOf(d+1) + "-DC";
+        }
+
+        header = header + "\r";
+
+        return header;
+
     }
 
     @ReactMethod
@@ -360,7 +449,7 @@ class BleManager extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void startNotificationUseBuffer(String deviceUUID, String serviceUUID, String characteristicUUID,
-                                           Integer buffer, Callback callback) {
+            Integer buffer, Callback callback) {
         Log.d(LOG_TAG, "startNotification");
         if (serviceUUID == null || characteristicUUID == null) {
             callback.invoke("ServiceUUID and characteristicUUID required.");
@@ -406,7 +495,7 @@ class BleManager extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void write(String deviceUUID, String serviceUUID, String characteristicUUID, ReadableArray message,
-                      Integer maxByteSize, Callback callback) {
+            Integer maxByteSize, Callback callback) {
         Log.d(LOG_TAG, "Write to: " + deviceUUID);
         if (serviceUUID == null || characteristicUUID == null) {
             callback.invoke("ServiceUUID and characteristicUUID required.");
@@ -425,11 +514,9 @@ class BleManager extends ReactContextBaseJavaModule {
             callback.invoke("Peripheral not found");
     }
 
-
-
     @ReactMethod
     public void writeWithoutResponse(String deviceUUID, String serviceUUID, String characteristicUUID,
-                                     ReadableArray message, Integer maxByteSize, Integer queueSleepTime, Callback callback) {
+            ReadableArray message, Integer maxByteSize, Integer queueSleepTime, Callback callback) {
         Log.d(LOG_TAG, "Write without response to: " + deviceUUID);
         if (serviceUUID == null || characteristicUUID == null) {
             callback.invoke("ServiceUUID and characteristicUUID required.");
@@ -465,8 +552,9 @@ class BleManager extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void retrieveServices(String deviceUUID, ReadableArray services, Callback callback) {
-        Log.d(LOG_TAG, "Retrieve services from: " + deviceUUID);
+        Log.d(LOG_TAG, "Retrieve services from: " + deviceUUID + services);
         Peripheral peripheral = peripherals.get(deviceUUID);
+        Log.d(LOG_TAG, "peripheral services from: " + peripheral);
         if (peripheral != null) {
             peripheral.retrieveServices(callback);
         } else
@@ -625,7 +713,8 @@ class BleManager extends ReactContextBaseJavaModule {
                 }
             } else if (action.equals(BluetoothDevice.ACTION_PAIRING_REQUEST)) {
                 BluetoothDevice bluetoothDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                if (bondRequest != null && bondRequest.uuid.equals(bluetoothDevice.getAddress()) && bondRequest.pin != null) {
+                if (bondRequest != null && bondRequest.uuid.equals(bluetoothDevice.getAddress())
+                        && bondRequest.pin != null) {
                     bluetoothDevice.setPin(bondRequest.pin.getBytes());
                     bluetoothDevice.createBond();
                 }
@@ -764,7 +853,6 @@ class BleManager extends ReactContextBaseJavaModule {
         return value;
     }
 
-
     private Peripheral retrieveOrCreatePeripheral(String peripheralUUID) {
         Peripheral peripheral = peripherals.get(peripheralUUID);
         if (peripheral == null) {
@@ -786,14 +874,14 @@ class BleManager extends ReactContextBaseJavaModule {
         return peripheral;
     }
 
-   @ReactMethod
+    @ReactMethod
     public void addListener(String eventName) {
-      // Keep: Required for RN built in Event Emitter Calls.
+        // Keep: Required for RN built in Event Emitter Calls.
     }
 
     @ReactMethod
-     public void removeListeners(Integer count) {
-      // Keep: Required for RN built in Event Emitter Calls.
+    public void removeListeners(Integer count) {
+        // Keep: Required for RN built in Event Emitter Calls.
     }
 
 }
